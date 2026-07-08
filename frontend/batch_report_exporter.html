@@ -171,6 +171,60 @@
       font-size: 0.9rem;
     }
 
+    .summary-card {
+      margin-top: 1rem;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 10px;
+      padding: 1rem;
+    }
+
+    .summary-card.hidden { display: none; }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .summary-item {
+      border: 1px solid #eceff1;
+      border-radius: 8px;
+      padding: 0.75rem;
+      background: #fafafa;
+    }
+
+    .summary-item .label {
+      font-size: 0.78rem;
+      color: #607d8b;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-bottom: 0.25rem;
+    }
+
+    .summary-item .value {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #263238;
+    }
+
+    .summary-item input {
+      width: 100%;
+      border: 1px solid #cfd8dc;
+      border-radius: 6px;
+      padding: 0.4rem 0.55rem;
+      font: inherit;
+      background: #fff;
+    }
+
+    tfoot.hidden { display: none; }
+
+    tfoot .summary-row td {
+      font-weight: 600;
+      background: #fff8e1;
+      border-top: 2px solid #ffe082;
+    }
+
     .footer-note {
       margin-top: 1.5rem;
       font-size: 0.8rem;
@@ -206,18 +260,63 @@
             <th>Batch#</th>
             <th>Credit</th>
             <th>Debit</th>
-            <th>Total Card</th>
             <th>Total</th>
             <th>Fee</th>
             <th>Credit</th>
             <th>T. Deposit</th>
             <th>T. Fee</th>
+            <th>Total Deposit</th>
+            <th>Total Fee</th>
+            <th>Total Credit</th>
+            <th>Invoice Number</th>
+            <th>Invoice Amount</th>
+            <th>Credit</th>
           </tr>
         </thead>
         <tbody id="preview-body">
-          <tr><td colspan="10" class="empty-state">Upload a PDF to preview extracted batches</td></tr>
+          <tr><td colspan="15" class="empty-state">Upload a PDF to preview extracted batches</td></tr>
         </tbody>
+        <tfoot id="preview-footer" class="hidden">
+          <tr class="summary-row">
+            <td colspan="9"></td>
+            <td id="footer-total-deposit"></td>
+            <td id="footer-total-fee"></td>
+            <td id="footer-total-credit"></td>
+            <td id="footer-invoice-number"></td>
+            <td id="footer-invoice-amount"></td>
+            <td id="footer-credit"></td>
+          </tr>
+        </tfoot>
       </table>
+    </div>
+
+    <div class="summary-card hidden" id="summary-card">
+      <div class="summary-grid">
+        <div class="summary-item">
+          <div class="label">Total Deposit</div>
+          <div class="value" id="summary-total-deposit">0.00</div>
+        </div>
+        <div class="summary-item">
+          <div class="label">Total Fee</div>
+          <div class="value" id="summary-total-fee">0.00</div>
+        </div>
+        <div class="summary-item">
+          <div class="label">Total Credit</div>
+          <div class="value" id="summary-total-credit">0.00</div>
+        </div>
+        <div class="summary-item">
+          <div class="label">Invoice Number</div>
+          <input id="invoice-number-input" type="text" placeholder="Enter invoice number">
+        </div>
+        <div class="summary-item">
+          <div class="label">Invoice Amount</div>
+          <input id="invoice-amount-input" type="number" step="0.01" min="0" placeholder="Enter invoice amount">
+        </div>
+        <div class="summary-item">
+          <div class="label">Credit</div>
+          <div class="value" id="summary-credit-should">0.00</div>
+        </div>
+      </div>
     </div>
 
     <p class="footer-note">Runs locally in your browser. No data leaves your device.</p>
@@ -238,6 +337,20 @@
     const exportBtn = document.getElementById("export-btn");
     const clearBtn = document.getElementById("clear-btn");
     const previewBody = document.getElementById("preview-body");
+    const previewFooter = document.getElementById("preview-footer");
+    const summaryCard = document.getElementById("summary-card");
+    const totalDepositEl = document.getElementById("summary-total-deposit");
+    const totalFeeEl = document.getElementById("summary-total-fee");
+    const totalCreditEl = document.getElementById("summary-total-credit");
+    const creditShouldEl = document.getElementById("summary-credit-should");
+    const invoiceNumberInput = document.getElementById("invoice-number-input");
+    const invoiceAmountInput = document.getElementById("invoice-amount-input");
+    const footerTotalDepositEl = document.getElementById("footer-total-deposit");
+    const footerTotalFeeEl = document.getElementById("footer-total-fee");
+    const footerTotalCreditEl = document.getElementById("footer-total-credit");
+    const footerInvoiceNumberEl = document.getElementById("footer-invoice-number");
+    const footerInvoiceAmountEl = document.getElementById("footer-invoice-amount");
+    const footerCreditEl = document.getElementById("footer-credit");
 
     let exportRows = [];
     let currentFilename = "";
@@ -268,10 +381,46 @@
       });
     }
 
+    function computeSummary(rows, invoiceAmount) {
+      const totalDeposit = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+      const totalFee = rows.reduce((sum, row) => sum + Number(row.fee || 0), 0);
+      const totalCredit = totalDeposit - totalFee;
+      const invoice = Number(invoiceAmount || 0);
+      const creditShould = invoice - totalCredit;
+
+      return { totalDeposit, totalFee, totalCredit, creditShould };
+    }
+
+    function renderSummary(rows) {
+      if (!rows.length) {
+        summaryCard.classList.add("hidden");
+        previewFooter.classList.add("hidden");
+        return;
+      }
+
+      const summary = computeSummary(rows, invoiceAmountInput.value);
+      totalDepositEl.textContent = formatMoney(summary.totalDeposit);
+      totalFeeEl.textContent = formatMoney(summary.totalFee);
+      totalCreditEl.textContent = formatMoney(summary.totalCredit);
+      creditShouldEl.textContent = formatMoney(summary.creditShould);
+
+      footerTotalDepositEl.textContent = formatMoney(summary.totalDeposit);
+      footerTotalFeeEl.textContent = formatMoney(summary.totalFee);
+      footerTotalCreditEl.textContent = formatMoney(summary.totalCredit);
+      footerInvoiceNumberEl.textContent = invoiceNumberInput.value || "";
+      footerInvoiceAmountEl.textContent = invoiceAmountInput.value
+        ? formatMoney(Number(invoiceAmountInput.value))
+        : "";
+      footerCreditEl.textContent = formatMoney(summary.creditShould);
+
+      summaryCard.classList.remove("hidden");
+      previewFooter.classList.remove("hidden");
+    }
+
     function renderPreview(rows) {
       if (!rows.length) {
         previewBody.innerHTML =
-          '<tr><td colspan="10" class="empty-state">No batches found in this PDF</td></tr>';
+          '<tr><td colspan="15" class="empty-state">No batches found in this PDF</td></tr>';
         return;
       }
 
@@ -283,12 +432,17 @@
           <td>${row.batchNumber}</td>
           <td>${formatMoney(row.credit)}</td>
           <td>${formatMoney(row.debit)}</td>
-          <td>${formatMoney(row.totalCard)}</td>
           <td>${formatMoney(row.total)}</td>
           <td>${formatMoney(row.fee)}</td>
           <td>${formatMoney(row.creditNet)}</td>
           <td>${row.tDeposit}</td>
           <td>${row.tFee}</td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
         </tr>`
         )
         .join("");
@@ -299,10 +453,14 @@
       currentFilename = "";
       exportBtn.disabled = true;
       clearBtn.disabled = true;
+      invoiceNumberInput.value = "";
+      invoiceAmountInput.value = "";
       hideStatus();
       hideWarning();
+      summaryCard.classList.add("hidden");
+      previewFooter.classList.add("hidden");
       previewBody.innerHTML =
-        '<tr><td colspan="10" class="empty-state">Upload a PDF to preview extracted batches</td></tr>';
+        '<tr><td colspan="15" class="empty-state">Upload a PDF to preview extracted batches</td></tr>';
     }
 
     async function processFile(file) {
@@ -331,6 +489,7 @@
         currentFilename = file.name.replace(/\.pdf$/i, "") + "_export.xlsx";
 
         renderPreview(exportRows);
+        renderSummary(exportRows);
         exportBtn.disabled = false;
         clearBtn.disabled = false;
 
@@ -347,6 +506,7 @@
       } catch (err) {
         exportRows = [];
         renderPreview([]);
+        renderSummary([]);
         showStatus(err.message || "Failed to process the PDF.", "error");
         clearBtn.disabled = false;
       }
@@ -378,10 +538,17 @@
 
     exportBtn.addEventListener("click", () => {
       if (!exportRows.length) return;
-      Export.downloadWorkbook(exportRows, currentFilename);
+      Export.downloadWorkbook(
+        exportRows,
+        currentFilename,
+        invoiceAmountInput.value,
+        invoiceNumberInput.value
+      );
     });
 
     clearBtn.addEventListener("click", reset);
+    invoiceNumberInput.addEventListener("input", () => renderSummary(exportRows));
+    invoiceAmountInput.addEventListener("input", () => renderSummary(exportRows));
   </script>
 </body>
 </html>
