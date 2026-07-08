@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node frontend/test/chevron-parser-regression.test.js",
+    "test": "node frontend/test/chevron-parser-regression.test.js && node frontend/test/eft-invoice-parser.test.js && node frontend/test/reconcile.test.js",
     "test:pdf": "node frontend/test/validate.js"
   },
   "keywords": [],

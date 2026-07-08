@@ -35,6 +35,13 @@
       font-size: 0.95rem;
     }
 
+    .upload-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1rem;
+      margin-bottom: 0.5rem;
+    }
+
     .dropzone {
       border: 2px dashed #b0bec5;
       border-radius: 10px;
@@ -61,7 +68,20 @@
       color: #1976d2;
     }
 
-    #file-input { display: none; }
+    .dropzone.loaded {
+      border-color: #43a047;
+      background: #e8f5e9;
+    }
+
+    .dropzone .file-name {
+      margin-top: 0.5rem;
+      font-size: 0.85rem;
+      color: #2e7d32;
+      font-weight: 500;
+    }
+
+    #file-input,
+    #invoice-file-input { display: none; }
 
     .status {
       margin: 1rem 0;
@@ -217,6 +237,11 @@
       background: #fff;
     }
 
+    .summary-item input:read-only {
+      background: #eceff1;
+      color: #455a64;
+    }
+
     tfoot.hidden { display: none; }
 
     tfoot .summary-row td {
@@ -236,12 +261,22 @@
 <body>
   <div class="container">
     <h1>Credit Batch Report → Excel</h1>
-    <p class="subtitle">Upload a Chevron batch settlement PDF to extract batch totals and export to Excel. All processing happens on your computer — nothing is uploaded.</p>
+    <p class="subtitle">Upload a Chevron batch settlement PDF and the matching EFT invoice notice to filter batches, reconcile amounts, and export to Excel. All processing happens on your computer — nothing is uploaded.</p>
 
-    <div class="dropzone" id="dropzone">
-      <strong>Drop PDF here</strong> or click to browse
-      <p>Chevron credit batch settlement reports only (Phase 1)</p>
-      <input type="file" id="file-input" accept="application/pdf">
+    <div class="upload-grid">
+      <div class="dropzone" id="batch-dropzone">
+        <strong>1. Batch settlement PDF</strong>
+        <p>Drop here or click to browse</p>
+        <div class="file-name hidden" id="batch-file-name"></div>
+        <input type="file" id="file-input" accept="application/pdf">
+      </div>
+
+      <div class="dropzone" id="invoice-dropzone">
+        <strong>2. Invoice / EFT notice PDF</strong>
+        <p>Drop here or click to browse</p>
+        <div class="file-name hidden" id="invoice-file-name"></div>
+        <input type="file" id="invoice-file-input" accept="application/pdf">
+      </div>
     </div>
 
     <div id="status" class="status hidden"></div>
@@ -265,6 +300,7 @@
             <th>Credit</th>
             <th>T. Deposit</th>
             <th>T. Fee</th>
+            <th>Invoice Amount</th>
             <th>Total Deposit</th>
             <th>Total Fee</th>
             <th>Total Credit</th>
@@ -274,11 +310,11 @@
           </tr>
         </thead>
         <tbody id="preview-body">
-          <tr><td colspan="15" class="empty-state">Upload a PDF to preview extracted batches</td></tr>
+          <tr><td colspan="16" class="empty-state">Upload both PDFs to preview matched batches</td></tr>
         </tbody>
         <tfoot id="preview-footer" class="hidden">
           <tr class="summary-row">
-            <td colspan="9"></td>
+            <td colspan="10"></td>
             <td id="footer-total-deposit"></td>
             <td id="footer-total-fee"></td>
             <td id="footer-total-credit"></td>
@@ -323,15 +359,21 @@
   </div>
 
   <script src="js/templates/chevron.js"></script>
+  <script src="js/templates/eft_invoice.js"></script>
   <script src="js/normalize.js"></script>
+  <script src="js/reconcile.js"></script>
   <script src="js/export.js"></script>
   <script src="js/ingestion.js"></script>
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-    const dropzone = document.getElementById("dropzone");
+    const batchDropzone = document.getElementById("batch-dropzone");
+    const invoiceDropzone = document.getElementById("invoice-dropzone");
     const fileInput = document.getElementById("file-input");
+    const invoiceFileInput = document.getElementById("invoice-file-input");
+    const batchFileNameEl = document.getElementById("batch-file-name");
+    const invoiceFileNameEl = document.getElementById("invoice-file-name");
     const statusEl = document.getElementById("status");
     const warningEl = document.getElementById("warning");
     const exportBtn = document.getElementById("export-btn");
@@ -352,8 +394,16 @@
     const footerInvoiceAmountEl = document.getElementById("footer-invoice-amount");
     const footerCreditEl = document.getElementById("footer-credit");
 
+    const COL_COUNT = 16;
+
+    let batchRecords = [];
+    let invoiceResult = null;
     let exportRows = [];
+    let reconcileWarnings = [];
+    let batchFileName = "";
+    let invoiceFileName = "";
     let currentFilename = "";
+    let invoiceFieldsAutoFilled = false;
 
     function showStatus(message, type) {
       statusEl.textContent = message;
@@ -365,8 +415,17 @@
       statusEl.classList.add("hidden");
     }
 
-    function showWarning(message) {
-      warningEl.textContent = message;
+    function showWarning(messages) {
+      const list = Array.isArray(messages) ? messages : [messages];
+      const text = list
+        .map((item) => (typeof item === "string" ? item : item.message))
+        .filter(Boolean)
+        .join(" ");
+      if (!text) {
+        hideWarning();
+        return;
+      }
+      warningEl.textContent = text;
       warningEl.classList.remove("hidden");
     }
 
@@ -381,28 +440,52 @@
       });
     }
 
-    function computeSummary(rows, invoiceAmount) {
-      const totalDeposit = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
-      const totalFee = rows.reduce((sum, row) => sum + Number(row.fee || 0), 0);
-      const totalCredit = totalDeposit - totalFee;
-      const invoice = Number(invoiceAmount || 0);
-      const creditShould = invoice - totalCredit;
-
-      return { totalDeposit, totalFee, totalCredit, creditShould };
+    function setDropzoneLoaded(dropzone, fileNameEl, fileName) {
+      dropzone.classList.add("loaded");
+      fileNameEl.textContent = fileName;
+      fileNameEl.classList.remove("hidden");
     }
 
-    function renderSummary(rows) {
-      if (!rows.length) {
+    function clearDropzone(dropzone, fileNameEl) {
+      dropzone.classList.remove("loaded");
+      fileNameEl.textContent = "";
+      fileNameEl.classList.add("hidden");
+    }
+
+    function setInvoiceInputs(summary, autoFilled) {
+      invoiceFieldsAutoFilled = autoFilled;
+      if (summary && summary.invoiceNumber) {
+        invoiceNumberInput.value = summary.invoiceNumber;
+      } else if (autoFilled) {
+        invoiceNumberInput.value = "";
+      }
+      if (summary && summary.invoiceAmount != null) {
+        invoiceAmountInput.value = String(summary.invoiceAmount);
+      } else if (autoFilled) {
+        invoiceAmountInput.value = "";
+      }
+      invoiceNumberInput.readOnly = autoFilled && !!summary?.invoiceNumber;
+      invoiceAmountInput.readOnly = autoFilled && summary?.invoiceAmount != null;
+    }
+
+    function updateExportState() {
+      const ready = batchRecords.length > 0 && invoiceResult && exportRows.length > 0;
+      exportBtn.disabled = !ready;
+      clearBtn.disabled = !(batchRecords.length || invoiceResult);
+    }
+
+    function renderSummaryFromReconcile(summary) {
+      if (!exportRows.length || !summary) {
         summaryCard.classList.add("hidden");
         previewFooter.classList.add("hidden");
         return;
       }
 
-      const summary = computeSummary(rows, invoiceAmountInput.value);
       totalDepositEl.textContent = formatMoney(summary.totalDeposit);
       totalFeeEl.textContent = formatMoney(summary.totalFee);
       totalCreditEl.textContent = formatMoney(summary.totalCredit);
-      creditShouldEl.textContent = formatMoney(summary.creditShould);
+      creditShouldEl.textContent =
+        summary.credit != null ? formatMoney(summary.credit) : "—";
 
       footerTotalDepositEl.textContent = formatMoney(summary.totalDeposit);
       footerTotalFeeEl.textContent = formatMoney(summary.totalFee);
@@ -411,16 +494,18 @@
       footerInvoiceAmountEl.textContent = invoiceAmountInput.value
         ? formatMoney(Number(invoiceAmountInput.value))
         : "";
-      footerCreditEl.textContent = formatMoney(summary.creditShould);
+      footerCreditEl.textContent =
+        summary.credit != null ? formatMoney(summary.credit) : "—";
 
       summaryCard.classList.remove("hidden");
       previewFooter.classList.remove("hidden");
     }
 
-    function renderPreview(rows) {
+    function renderPreview(rows, emptyMessage) {
       if (!rows.length) {
-        previewBody.innerHTML =
-          '<tr><td colspan="15" class="empty-state">No batches found in this PDF</td></tr>';
+        previewBody.innerHTML = `<tr><td colspan="${COL_COUNT}" class="empty-state">${emptyMessage}</td></tr>`;
+        summaryCard.classList.add("hidden");
+        previewFooter.classList.add("hidden");
         return;
       }
 
@@ -437,6 +522,7 @@
           <td>${formatMoney(row.creditNet)}</td>
           <td>${row.tDeposit}</td>
           <td>${row.tFee}</td>
+          <td>${row.invoiceAmount !== "" && row.invoiceAmount != null ? formatMoney(row.invoiceAmount) : ""}</td>
           <td></td>
           <td></td>
           <td></td>
@@ -448,25 +534,63 @@
         .join("");
     }
 
-    function reset() {
-      exportRows = [];
-      currentFilename = "";
-      exportBtn.disabled = true;
-      clearBtn.disabled = true;
-      invoiceNumberInput.value = "";
-      invoiceAmountInput.value = "";
-      hideStatus();
-      hideWarning();
-      summaryCard.classList.add("hidden");
-      previewFooter.classList.add("hidden");
-      previewBody.innerHTML =
-        '<tr><td colspan="15" class="empty-state">Upload a PDF to preview extracted batches</td></tr>';
+    function runReconcile() {
+      if (!batchRecords.length || !invoiceResult) {
+        exportRows = [];
+        updateExportState();
+        return null;
+      }
+
+      const result = Reconcile.reconcile(batchRecords, invoiceResult);
+      exportRows = result.exportRows;
+      reconcileWarnings = result.warnings;
+      setInvoiceInputs(result.summary, true);
+      renderPreview(
+        exportRows,
+        "No invoice-matched batches found — check that both PDFs belong to the same period."
+      );
+      renderSummaryFromReconcile(result.summary);
+      updateExportState();
+
+      if (reconcileWarnings.length) {
+        showWarning(reconcileWarnings);
+      } else {
+        hideWarning();
+      }
+
+      return result;
     }
 
-    async function processFile(file) {
-      hideWarning();
-      showStatus("Processing PDF…", "info");
+    function reset() {
+      batchRecords = [];
+      invoiceResult = null;
+      exportRows = [];
+      reconcileWarnings = [];
+      batchFileName = "";
+      invoiceFileName = "";
+      currentFilename = "";
+      invoiceFieldsAutoFilled = false;
+
+      clearDropzone(batchDropzone, batchFileNameEl);
+      clearDropzone(invoiceDropzone, invoiceFileNameEl);
+
       exportBtn.disabled = true;
+      clearBtn.disabled = true;
+      invoiceNumberInput.readOnly = false;
+      invoiceAmountInput.readOnly = false;
+      invoiceNumberInput.value = "";
+      invoiceAmountInput.value = "";
+
+      hideStatus();
+      hideWarning();
+      previewBody.innerHTML = `<tr><td colspan="${COL_COUNT}" class="empty-state">Upload both PDFs to preview matched batches</td></tr>`;
+      summaryCard.classList.add("hidden");
+      previewFooter.classList.add("hidden");
+    }
+
+    async function processBatchFile(file) {
+      hideWarning();
+      showStatus("Processing batch settlement PDF…", "info");
 
       try {
         const arrayBuffer = await Ingestion.readFileAsArrayBuffer(file);
@@ -474,29 +598,44 @@
         const { records: rawRecords, warnings } = ChevronTemplate.extractFromLines(lines);
 
         if (!rawRecords.length) {
+          batchRecords = [];
           exportRows = [];
-          renderPreview([]);
+          renderPreview([], "No batch totals found — this PDF may be scanned or an unsupported format.");
           showStatus(
             "No batch totals found — this PDF may be scanned or an unsupported format.",
             "error"
           );
           clearBtn.disabled = false;
+          updateExportState();
           return;
         }
 
-        const normalized = Normalize.normalizeAll(rawRecords);
-        exportRows = Normalize.toExportRows(normalized);
+        batchRecords = Normalize.normalizeAll(rawRecords);
+        batchFileName = file.name;
+        setDropzoneLoaded(batchDropzone, batchFileNameEl, batchFileName);
+
+        if (invoiceResult) {
+          const result = runReconcile();
+          const matched = result ? result.exportRows.length : 0;
+          showStatus(
+            `Batch PDF: ${batchRecords.length} batches extracted. Invoice matched ${matched} row${matched === 1 ? "" : "s"}.`,
+            "info"
+          );
+        } else {
+          exportRows = [];
+          renderPreview(
+            [],
+            `Extracted ${batchRecords.length} batches — upload the invoice PDF to filter and export.`
+          );
+          showStatus(
+            `Extracted ${batchRecords.length} batch${batchRecords.length === 1 ? "" : "es"} from ${pageCount} page${pageCount === 1 ? "" : "s"}. Upload the invoice PDF to continue.`,
+            "info"
+          );
+        }
+
         currentFilename = file.name.replace(/\.pdf$/i, "") + "_export.xlsx";
-
-        renderPreview(exportRows);
-        renderSummary(exportRows);
-        exportBtn.disabled = false;
         clearBtn.disabled = false;
-
-        showStatus(
-          `Extracted ${exportRows.length} batch${exportRows.length === 1 ? "" : "es"} from ${pageCount} page${pageCount === 1 ? "" : "s"}.`,
-          "info"
-        );
+        updateExportState();
 
         if (warnings.length) {
           showWarning(
@@ -504,37 +643,84 @@
           );
         }
       } catch (err) {
+        batchRecords = [];
         exportRows = [];
-        renderPreview([]);
-        renderSummary([]);
-        showStatus(err.message || "Failed to process the PDF.", "error");
+        renderPreview([], err.message || "Failed to process the batch PDF.");
+        showStatus(err.message || "Failed to process the batch PDF.", "error");
         clearBtn.disabled = false;
+        updateExportState();
       }
     }
 
-    dropzone.addEventListener("click", () => fileInput.click());
+    async function processInvoiceFile(file) {
+      if (!batchRecords.length) {
+        showStatus("Upload the batch settlement PDF first.", "error");
+        return;
+      }
 
-    dropzone.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      dropzone.classList.add("dragover");
-    });
+      hideWarning();
+      showStatus("Processing invoice PDF…", "info");
 
-    dropzone.addEventListener("dragleave", () => {
-      dropzone.classList.remove("dragover");
-    });
+      try {
+        const arrayBuffer = await Ingestion.readFileAsArrayBuffer(file);
+        const { lines } = await Ingestion.extractLinesFromPdf(arrayBuffer);
+        invoiceResult = EftInvoiceTemplate.extractFromLines(lines);
+        invoiceFileName = file.name;
+        setDropzoneLoaded(invoiceDropzone, invoiceFileNameEl, invoiceFileName);
 
-    dropzone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      dropzone.classList.remove("dragover");
-      const file = e.dataTransfer.files[0];
-      if (file) processFile(file);
-    });
+        const result = runReconcile();
+        const matched = result ? result.exportRows.length : 0;
 
-    fileInput.addEventListener("change", () => {
-      const file = fileInput.files[0];
-      if (file) processFile(file);
-      fileInput.value = "";
-    });
+        if (!matched) {
+          showStatus(
+            "Invoice parsed but no batches matched — check that both PDFs belong to the same period.",
+            "error"
+          );
+          return;
+        }
+
+        showStatus(
+          `Matched ${matched} batch row${matched === 1 ? "" : "s"} from invoice (${invoiceResult.batchLines.length} invoice line${invoiceResult.batchLines.length === 1 ? "" : "s"}).`,
+          "info"
+        );
+      } catch (err) {
+        invoiceResult = null;
+        exportRows = [];
+        clearDropzone(invoiceDropzone, invoiceFileNameEl);
+        renderPreview([], err.message || "Failed to process the invoice PDF.");
+        showStatus(err.message || "Failed to process the invoice PDF.", "error");
+        updateExportState();
+      }
+    }
+
+    function wireDropzone(dropzone, input, handler) {
+      dropzone.addEventListener("click", () => input.click());
+
+      dropzone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        dropzone.classList.add("dragover");
+      });
+
+      dropzone.addEventListener("dragleave", () => {
+        dropzone.classList.remove("dragover");
+      });
+
+      dropzone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropzone.classList.remove("dragover");
+        const file = e.dataTransfer.files[0];
+        if (file) handler(file);
+      });
+
+      input.addEventListener("change", () => {
+        const file = input.files[0];
+        if (file) handler(file);
+        input.value = "";
+      });
+    }
+
+    wireDropzone(batchDropzone, fileInput, processBatchFile);
+    wireDropzone(invoiceDropzone, invoiceFileInput, processInvoiceFile);
 
     exportBtn.addEventListener("click", () => {
       if (!exportRows.length) return;
@@ -547,8 +733,37 @@
     });
 
     clearBtn.addEventListener("click", reset);
-    invoiceNumberInput.addEventListener("input", () => renderSummary(exportRows));
-    invoiceAmountInput.addEventListener("input", () => renderSummary(exportRows));
+
+    invoiceNumberInput.addEventListener("input", () => {
+      if (invoiceFieldsAutoFilled) return;
+      if (exportRows.length) {
+        const summary = computeManualSummary();
+        renderSummaryFromReconcile(summary);
+      }
+    });
+
+    invoiceAmountInput.addEventListener("input", () => {
+      if (invoiceFieldsAutoFilled) return;
+      if (exportRows.length) {
+        const summary = computeManualSummary();
+        renderSummaryFromReconcile(summary);
+      }
+    });
+
+    function computeManualSummary() {
+      const totalDeposit = exportRows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+      const totalFee = exportRows.reduce((sum, row) => sum + Number(row.fee || 0), 0);
+      const totalCredit = totalDeposit - totalFee;
+      const invoiceAmount = Number(invoiceAmountInput.value || 0);
+      return {
+        totalDeposit,
+        totalFee,
+        totalCredit,
+        invoiceNumber: invoiceNumberInput.value,
+        invoiceAmount: invoiceAmountInput.value ? invoiceAmount : null,
+        credit: invoiceAmountInput.value ? invoiceAmount - totalCredit : null,
+      };
+    }
   </script>
 </body>
 </html>

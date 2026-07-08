@@ -68,6 +68,10 @@ const Normalize = (() => {
         creditNet: record.net_amount,
         tDeposit: "",
         tFee: "",
+        invoiceAmount:
+          record.invoice_amount != null && record.invoice_amount !== ""
+            ? Number(record.invoice_amount)
+            : "",
       };
     });
   }

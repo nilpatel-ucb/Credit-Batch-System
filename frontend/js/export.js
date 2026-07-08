@@ -13,6 +13,7 @@ const Export = (() => {
     "Credit",
     "T. Deposit",
     "T. Fee",
+    "Invoice Amount",
   ];
 
   const SUMMARY_HEADERS = [
@@ -45,6 +46,9 @@ const Export = (() => {
         round2(row.creditNet),
         row.tDeposit,
         row.tFee,
+        row.invoiceAmount !== "" && row.invoiceAmount != null
+          ? round2(row.invoiceAmount)
+          : "",
         ...emptySummaryCells,
       ]);
     });
@@ -59,10 +63,10 @@ const Export = (() => {
         ...BATCH_HEADERS.map(() => ""),
         { t: "n", f: `SUM(E${firstDataRowNum}:E${lastDataRowNum})` },
         { t: "n", f: `SUM(F${firstDataRowNum}:F${lastDataRowNum})` },
-        { t: "n", f: `J${summaryRowNum}-K${summaryRowNum}` },
+        { t: "n", f: `K${summaryRowNum}-L${summaryRowNum}` },
         "",
         "",
-        { t: "n", f: `N${summaryRowNum}-L${summaryRowNum}` },
+        { t: "n", f: `O${summaryRowNum}-M${summaryRowNum}` },
       ]);
     }
 
@@ -81,11 +85,11 @@ const Export = (() => {
       const summaryRowNumber = exportRows.length + 3;
 
       if (invoiceNumber !== undefined && invoiceNumber !== null && invoiceNumber !== "") {
-        worksheet[`M${summaryRowNumber}`] = { t: "s", v: String(invoiceNumber) };
+        worksheet[`N${summaryRowNumber}`] = { t: "s", v: String(invoiceNumber) };
       }
 
       if (invoiceAmount !== undefined && invoiceAmount !== null && invoiceAmount !== "") {
-        worksheet[`N${summaryRowNumber}`] = {
+        worksheet[`O${summaryRowNumber}`] = {
           t: "n",
           v: round2(Number(invoiceAmount) || 0),
         };
