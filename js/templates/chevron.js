@@ -4,9 +4,11 @@
  */
 const ChevronTemplate = (() => {
   const DETAIL_ROW_RE =
-    /^(\d{5})\s+(\d{2}-\d{2}-\d{4})\s+(\d+)\s+(CHV|CC|DC)\b/i;
+    /^(\d{5,6})\s+(\d{2}-\d{2}-\d{4})\s+(\d+)\s+(CHV|CC|DC)\b/i;
   const BATCH_TOTAL_RE =
     /^Batch\s+(?:Total\s+)?(\d+)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2}|-)\s+([\d,]+\.\d{2}|-)\s+([\d,]+\.\d{2}|-)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})(?:\s+Total)?$/i;
+  const BATCH_TOTAL_VALUES_RE =
+    /^(\d+)\s+[\d,]+\.\d{2}\s+(?:[\d,]+\.\d{2}|-)\s+(?:[\d,]+\.\d{2}|-)\s+(?:[\d,]+\.\d{2}|-)\s+[\d,]+\.\d{2}\s+[\d,]+\.\d{2}(?:\s+Total)?$/i;
 
   function preprocessLines(lines) {
     const merged = [];
@@ -29,6 +31,15 @@ const ChevronTemplate = (() => {
 
       if (/^Total$/i.test(line) && merged.length > 0 && /^Batch\b/i.test(merged[merged.length - 1])) {
         merged[merged.length - 1] = `${merged[merged.length - 1]} Total`;
+        const nextRaw = lines[i + 1];
+        const nextLine = nextRaw ? nextRaw.trim() : "";
+
+        // Some PDFs split the batch-total label and values across two lines:
+        // "Batch" + "Total" on one line and the numeric totals on the next.
+        if (nextLine && BATCH_TOTAL_VALUES_RE.test(nextLine)) {
+          merged[merged.length - 1] = `${merged[merged.length - 1]} ${nextLine}`;
+          i += 1;
+        }
         continue;
       }
 

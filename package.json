@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node test/validate.js"
+    "test": "node test/chevron-parser-regression.test.js",
+    "test:pdf": "node test/validate.js"
   },
   "keywords": [],
   "author": "",
