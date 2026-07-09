@@ -2,8 +2,23 @@
  * Normalization layer — maps raw template records into the fixed internal schema.
  */
 const Normalize = (() => {
+  function parseToLocalDate(value) {
+    if (value instanceof Date) {
+      return value;
+    }
+    const str = String(value);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      const [year, month, day] = str.split("-").map(Number);
+      return new Date(year, month - 1, day);
+    }
+    return new Date(value);
+  }
+
   function toISODate(date) {
-    const d = date instanceof Date ? date : new Date(date);
+    if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return date;
+    }
+    const d = date instanceof Date ? date : parseToLocalDate(date);
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
     const day = String(d.getDate()).padStart(2, "0");
@@ -11,7 +26,7 @@ const Normalize = (() => {
   }
 
   function formatDisplayDate(date) {
-    const d = date instanceof Date ? date : new Date(date);
+    const d = date instanceof Date ? date : parseToLocalDate(date);
     return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
   }
 
@@ -23,8 +38,7 @@ const Normalize = (() => {
   function normalizeRecord(raw) {
     return {
       site_id: raw.site_id || "",
-      batch_date:
-        raw.batch_date instanceof Date ? raw.batch_date : new Date(raw.batch_date),
+      batch_date: parseToLocalDate(raw.batch_date),
       batch_number: String(raw.batch_number),
       gross_amount: Number(raw.gross_amount),
       total_fee: Number(raw.total_fee),

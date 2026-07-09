@@ -113,20 +113,20 @@
         <section class="batches-section">
           <div class="section-header">
             <h2>Batches <span id="batch-count-badge" class="badge">0</span></h2>
+            <p class="section-hint">Click an upload to view batches, or delete an entire source upload</p>
           </div>
           <div class="table-wrap">
             <table id="batches-table">
-              <!-- this is the table for the batches after saving -->
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Batch #</th>
+                  <th>Source PDF</th>
+                  <th>Batches</th>
+                  <th>Period</th>
                   <th>Total Credit</th>
                   <th>Fee</th>
                   <th>Total After Fee Credit</th>
-                  <th>Site ID</th>
-                  <th>Source PDF</th>
                   <th>Ingested</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -136,11 +136,38 @@
               </tbody>
             </table>
           </div>
+          <div id="batch-lines-panel" class="detail-panel" hidden>
+            <div class="detail-panel-header">
+              <h3>Batches — <span id="batch-lines-title">—</span></h3>
+              <div class="detail-panel-actions">
+                <button type="button" id="delete-batch-source-btn" class="danger" hidden>Delete upload</button>
+                <button type="button" id="collapse-batch-lines-btn" class="collapse-btn">Collapse</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table id="batch-lines-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Batch #</th>
+                    <th>Total Credit</th>
+                    <th>Fee</th>
+                    <th>Total After Fee Credit</th>
+                    <th>Site ID</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
         </section>
 
         <section class="invoices-section">
           <div class="section-header">
             <h2>Invoices <span id="invoice-count-badge" class="badge">0</span></h2>
+            <p class="section-hint">Click an invoice to view lines, reconcile, or delete an entire invoice upload</p>
           </div>
           <div class="table-wrap">
             <table id="invoices-table">
@@ -153,14 +180,119 @@
                   <th>Lines</th>
                   <th>Source PDF</th>
                   <th>Processed</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 <tr class="empty-row">
-                  <td colspan="7">Open a store to view invoices</td>
+                  <td colspan="8">Open a store to view invoices</td>
                 </tr>
               </tbody>
             </table>
+          </div>
+          <div id="invoice-lines-panel" class="detail-panel" hidden>
+            <div class="detail-panel-header">
+              <h3>Invoice lines — <span id="invoice-lines-title">—</span></h3>
+              <div class="detail-panel-actions">
+                <button type="button" id="invoice-lines-reconcile-btn" class="primary">Reconcile</button>
+                <button type="button" id="invoice-lines-delete-btn" class="danger" hidden>Delete invoice</button>
+                <button type="button" id="collapse-invoice-lines-btn" class="collapse-btn">Collapse</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table id="invoice-lines-table">
+                <thead>
+                  <tr>
+                    <th>Invoice Line ID</th>
+                    <th>Batch #</th>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="reconcile-section" class="detail-panel reconcile-section" hidden>
+            <div class="detail-panel-header">
+              <h3>Reconciliation — <span id="reconcile-invoice-number">—</span></h3>
+              <div class="reconcile-header-actions">
+                <button type="button" id="reconcile-run-btn" class="primary">Reconcile</button>
+                <button type="button" id="collapse-reconcile-btn" class="collapse-btn">Collapse</button>
+              </div>
+            </div>
+
+            <div id="reconcile-status" class="status-message" hidden></div>
+
+            <div class="reconcile-summary-grid">
+              <div class="reconcile-summary-item">
+                <span class="label">Total Deposit</span>
+                <span id="reconcile-total-deposit" class="value">—</span>
+              </div>
+              <div class="reconcile-summary-item">
+                <span class="label">Total Fee</span>
+                <span id="reconcile-total-fee" class="value">—</span>
+              </div>
+              <div class="reconcile-summary-item">
+                <span class="label">Matched Credit</span>
+                <span id="reconcile-total-credit" class="value">—</span>
+              </div>
+              <div class="reconcile-summary-item">
+                <span class="label">Invoice Amount</span>
+                <span id="reconcile-invoice-amount" class="value">—</span>
+              </div>
+              <div class="reconcile-summary-item">
+                <span class="label">Credit Discrepancy</span>
+                <span id="reconcile-credit-gap" class="value">—</span>
+              </div>
+              <div class="reconcile-summary-item reconcile-summary-item-emphasis">
+                <span class="label">Missing Credit</span>
+                <span id="reconcile-missing-credit" class="value">—</span>
+              </div>
+            </div>
+
+            <p id="reconcile-coverage" class="reconcile-coverage"></p>
+            <p id="reconcile-coverage-warning" class="reconcile-coverage-warning" hidden>
+              Review missing batches and unmatched lines before treating the credit discrepancy as final.
+            </p>
+
+            <h4 class="reconcile-subheading">Exceptions</h4>
+            <div class="table-wrap">
+              <table id="reconcile-exceptions-table">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Batch #</th>
+                    <th>Batch Date</th>
+                    <th>Amount</th>
+                    <th>Invoice Line</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+
+            <details class="reconcile-matched-details">
+              <summary>Matched batches</summary>
+              <div class="table-wrap">
+                <table id="reconcile-matched-table">
+                  <thead>
+                    <tr>
+                      <th>Batch Date</th>
+                      <th>Batch #</th>
+                      <th>Net Amount</th>
+                      <th>Invoice Line</th>
+                      <th>Line Date</th>
+                      <th>Invoice Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </details>
           </div>
         </section>
       </main>
@@ -170,6 +302,7 @@
   <script src="js/store-selector.js"></script>
   <script src="js/batch-ingest-ui.js"></script>
   <script src="js/invoice-ingest-ui.js"></script>
+  <script src="js/reconcile-ui.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

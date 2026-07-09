@@ -56,6 +56,14 @@ function registerIpcHandlers() {
     storeManager.insertBatches(records, sourcePdf)
   );
 
+  ipcMain.handle("batches:delete", (_event, batchId) =>
+    storeManager.deleteBatch(batchId)
+  );
+
+  ipcMain.handle("batches:delete-source", (_event, sourcePdf, ingestedAt) =>
+    storeManager.deleteBatchSource(sourcePdf, ingestedAt)
+  );
+
   ipcMain.handle("invoices:insert", (_event, summary, batchLines, pdfFilename) =>
     storeManager.insertInvoice(summary, batchLines, pdfFilename)
   );
@@ -64,6 +72,18 @@ function registerIpcHandlers() {
 
   ipcMain.handle("invoices:lines", (_event, invoiceId) =>
     storeManager.getInvoiceLines(invoiceId)
+  );
+
+  ipcMain.handle("invoices:delete", (_event, invoiceId) =>
+    storeManager.deleteInvoice(invoiceId)
+  );
+
+  ipcMain.handle("reconcile:run", (_event, invoiceId) =>
+    storeManager.reconcileInvoice(invoiceId)
+  );
+
+  ipcMain.handle("reconcile:last", (_event, invoiceId) =>
+    storeManager.getLastReconciliationRun(invoiceId)
   );
 //if parsing is empty throw an error
   ipcMain.handle("parse:chevron", async (_event, buffer) => {

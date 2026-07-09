@@ -184,12 +184,19 @@ const InvoiceIngestUI = (() => {
         pendingBatchLines,
         pendingFilename
       );
-      showStatus(
+      const reconciliation = result.reconciliation;
+      const summary = reconciliation?.summary;
+      const statusParts = [
         `Saved invoice ${pendingSummary.invoiceNumber} (${result.lineCount} line${result.lineCount === 1 ? "" : "s"}).`,
-        "success"
-      );
+      ];
+      if (summary) {
+        statusParts.push(
+          `${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} missing from invoice, ${StoreSelector.formatMoney(summary.totalMissingCredit)} missing credit.`
+        );
+      }
+      showStatus(statusParts.join(" "), "success");
       clearPreview();
-      if (onComplete) await onComplete();
+      if (onComplete) await onComplete(result);
     } catch (err) {
       showStatus(err.message || "Failed to save invoice.", "error");
     }

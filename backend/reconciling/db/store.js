@@ -3,6 +3,8 @@ const path = require("path");
 const Database = require("better-sqlite3");
 const { migrate } = require("./migrations");
 const Normalize = require("../../parsing/normalize");
+const { runReconciliation } = require("../reconcile-service");
+const { expandReconcilePeriod } = require("../reconcile");
 
 function sanitizeStoreName(name) {
   const trimmed = String(name || "").trim();
@@ -220,11 +222,122 @@ function createStoreManager(storesDir) {
     return requireDb()
       .prepare(
         `SELECT id, site_id, batch_date, batch_number, gross_amount, total_fee,
-                net_amount, source_pdf, ingested_at, match_status
+                net_amount, source_pdf, ingested_at, match_status,
+                invoice_line_id, invoice_amount, last_reconciled_at
          FROM batches
          ORDER BY batch_date, batch_number`
       )
       .all();
+  }
+
+  function deleteBatchesByIds(database, ids) {
+    if (!ids.length) {
+      return { deletedCount: 0, matchedCount: 0 };
+    }
+
+    const placeholders = ids.map(() => "?").join(", ");
+    const matchedRow = database
+      .prepare(
+        `SELECT COUNT(*) AS c
+         FROM batches
+         WHERE id IN (${placeholders}) AND match_status = 'matched'`
+      )
+      .get(...ids);
+
+    database
+      .prepare(
+        `UPDATE invoice_lines
+         SET match_status = 'unmatched', batch_id = NULL
+         WHERE batch_id IN (${placeholders})`
+      )
+      .run(...ids);
+
+    const result = database
+      .prepare(`DELETE FROM batches WHERE id IN (${placeholders})`)
+      .run(...ids);
+
+    return {
+      deletedCount: result.changes,
+      matchedCount: matchedRow.c,
+    };
+  }
+
+  function deleteBatch(batchId) {
+    const database = requireDb();
+    const id = Number(batchId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error("A valid batch ID is required.");
+    }
+
+    const batch = database
+      .prepare(
+        `SELECT id, batch_date, batch_number, net_amount, match_status, invoice_line_id
+         FROM batches
+         WHERE id = ?`
+      )
+      .get(id);
+
+    if (!batch) {
+      throw new Error("Batch not found.");
+    }
+
+    const run = database.transaction(() => {
+      deleteBatchesByIds(database, [id]);
+    });
+
+    run();
+
+    return {
+      id: batch.id,
+      batchDate: batch.batch_date,
+      batchNumber: batch.batch_number,
+      netAmount: batch.net_amount,
+      wasMatched: batch.match_status === "matched",
+      batchCount: getBatchCount(),
+    };
+  }
+
+  function deleteBatchSource(sourcePdf, ingestedAt) {
+    const database = requireDb();
+    const ingested = String(ingestedAt || "").trim();
+    if (!ingested) {
+      throw new Error("Upload timestamp is required.");
+    }
+
+    const source = sourcePdf == null ? "" : String(sourcePdf);
+
+    const batches = database
+      .prepare(
+        `SELECT id, source_pdf, ingested_at
+         FROM batches
+         WHERE COALESCE(source_pdf, '') = ?
+           AND ingested_at = ?`
+      )
+      .all(source, ingested);
+
+    if (!batches.length) {
+      throw new Error("No batches found for this upload.");
+    }
+
+    const ids = batches.map((batch) => batch.id);
+    let deletedCount = 0;
+    let matchedCount = 0;
+
+    const run = database.transaction(() => {
+      const result = deleteBatchesByIds(database, ids);
+      deletedCount = result.deletedCount;
+      matchedCount = result.matchedCount;
+    });
+
+    run();
+
+    return {
+      sourcePdf: batches[0].source_pdf || "",
+      ingestedAt: batches[0].ingested_at,
+      deletedCount,
+      matchedCount,
+      batchCount: getBatchCount(),
+    };
   }
 
   function insertBatches(records, sourcePdf) {
@@ -426,11 +539,14 @@ function createStoreManager(storesDir) {
 
     run();
 
+    const reconciliation = reconcileInvoice(invoiceId);
+
     return {
       invoiceId,
       lineCount: normalizedLines.length,
       periodStart,
       periodEnd,
+      reconciliation,
     };
   }
 
@@ -451,12 +567,231 @@ function createStoreManager(storesDir) {
   function getInvoiceLines(invoiceId) {
     return requireDb()
       .prepare(
-        `SELECT id, invoice_line_id, batch_number, amount, inv_date, match_status
+        `SELECT id, invoice_line_id, batch_number, amount, inv_date, match_status, batch_id
          FROM invoice_lines
          WHERE invoice_id = ?
          ORDER BY inv_date, invoice_line_id`
       )
       .all(invoiceId);
+  }
+
+  function deleteInvoice(invoiceId) {
+    const database = requireDb();
+    const id = Number(invoiceId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error("A valid invoice ID is required.");
+    }
+
+    const invoice = database
+      .prepare(
+        `SELECT id, invoice_number, pdf_filename, period_start, period_end
+         FROM invoices
+         WHERE id = ?`
+      )
+      .get(id);
+
+    if (!invoice) {
+      throw new Error("Invoice not found.");
+    }
+
+    const lineCount = database
+      .prepare(`SELECT COUNT(*) AS c FROM invoice_lines WHERE invoice_id = ?`)
+      .get(id).c;
+
+    const run = database.transaction(() => {
+      database
+        .prepare(
+          `UPDATE batches
+           SET match_status = 'unmatched',
+               invoice_line_id = NULL,
+               invoice_amount = NULL,
+               last_reconciled_at = NULL
+           WHERE id IN (
+             SELECT batch_id FROM invoice_lines WHERE invoice_id = ? AND batch_id IS NOT NULL
+           )`
+        )
+        .run(id);
+
+      database.prepare(`DELETE FROM reconciliation_runs WHERE invoice_id = ?`).run(id);
+      database.prepare(`DELETE FROM invoice_lines WHERE invoice_id = ?`).run(id);
+      database.prepare(`DELETE FROM invoices WHERE id = ?`).run(id);
+    });
+
+    run();
+
+    return {
+      invoiceId: invoice.id,
+      invoiceNumber: invoice.invoice_number,
+      pdfFilename: invoice.pdf_filename || "",
+      lineCount,
+      invoiceCount: database.prepare(`SELECT COUNT(*) AS c FROM invoices`).get().c,
+    };
+  }
+
+  function getInvoiceForReconcile(invoiceId) {
+    return requireDb()
+      .prepare(
+        `SELECT id, invoice_number, invoice_total, period_start, period_end
+         FROM invoices
+         WHERE id = ?`
+      )
+      .get(invoiceId);
+  }
+
+  function getBatchesInPeriod(periodStart, periodEnd) {
+    return requireDb()
+      .prepare(
+        `SELECT id, site_id, batch_date, batch_number, gross_amount, total_fee, net_amount,
+                match_status, invoice_line_id, invoice_amount, last_reconciled_at
+         FROM batches
+         WHERE batch_date >= ? AND batch_date <= ?
+         ORDER BY batch_date, batch_number, id`
+      )
+      .all(periodStart, periodEnd);
+  }
+
+  function reconcileInvoice(invoiceId) {
+    const database = requireDb();
+    return runReconciliation(database, invoiceId, {
+      getInvoiceForReconcile,
+      getInvoiceLines,
+      getBatchesInPeriod,
+      getBatches,
+    });
+  }
+
+  function getLastReconciliationRun(invoiceId) {
+    const database = requireDb();
+    const run = database
+      .prepare(
+        `SELECT id, invoice_id, run_at, scoped_batch_count, matched_count,
+                missing_from_invoice_count, unmatched_line_count, mismatch_count,
+                total_deposit, total_fee, total_credit, credit_discrepancy
+         FROM reconciliation_runs
+         WHERE invoice_id = ?
+         ORDER BY run_at DESC, id DESC
+         LIMIT 1`
+      )
+      .get(invoiceId);
+
+    if (!run) {
+      return null;
+    }
+
+    const invoice = getInvoiceForReconcile(invoiceId);
+    if (!invoice) {
+      return null;
+    }
+
+    const lines = getInvoiceLines(invoiceId);
+    const { scopeStart, scopeEnd } = expandReconcilePeriod(invoice.period_start, invoice.period_end);
+    const scopedBatches = getBatchesInPeriod(scopeStart, scopeEnd);
+    const allBatches = getBatches();
+    const batchById = new Map(allBatches.map((batch) => [batch.id, batch]));
+
+    const matched = lines
+      .filter((line) => line.match_status === "matched" && line.batch_id)
+      .map((line) => {
+        const batch = batchById.get(line.batch_id);
+        if (!batch) return null;
+        return {
+          batchId: batch.id,
+          batchDate: batch.batch_date,
+          batchNumber: batch.batch_number,
+          grossAmount: batch.gross_amount,
+          totalFee: batch.total_fee,
+          netAmount: batch.net_amount,
+          invoiceLineId: line.invoice_line_id,
+          invoiceAmount: Math.abs(Number(line.amount)),
+          invDate: line.inv_date,
+        };
+      })
+      .filter(Boolean);
+
+    const missingBatches = scopedBatches.filter(
+      (batch) => batch.match_status === "missing_from_invoice"
+    );
+    const totalMissingCredit = missingBatches.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
+
+    const exceptions = [];
+    for (const batch of missingBatches) {
+      exceptions.push({
+        type: "missing_from_invoice",
+        batchId: batch.id,
+        batchDate: batch.batch_date,
+        batchNumber: batch.batch_number,
+        netAmount: batch.net_amount,
+        invoiceLineId: null,
+        invoiceAmount: null,
+        message: "Batch is in the invoice period but has no matching invoice line.",
+      });
+    }
+
+    for (const line of lines) {
+      if (line.match_status === "unmatched") {
+        exceptions.push({
+          type: "unmatched_line",
+          batchId: null,
+          batchDate: null,
+          batchNumber: line.batch_number,
+          netAmount: null,
+          invoiceLineId: line.invoice_line_id,
+          invoiceAmount: line.amount,
+          message: "No matching batch found in store for this invoice line.",
+        });
+      } else if (line.match_status === "ambiguous") {
+        exceptions.push({
+          type: "ambiguous",
+          batchId: null,
+          batchDate: null,
+          batchNumber: line.batch_number,
+          netAmount: null,
+          invoiceLineId: line.invoice_line_id,
+          invoiceAmount: line.amount,
+          message: "Multiple batch candidates with the same date proximity.",
+        });
+      } else if (line.match_status === "mismatch" && line.batch_id) {
+        const batch = batchById.get(line.batch_id);
+        exceptions.push({
+          type: "mismatch",
+          batchId: line.batch_id,
+          batchDate: batch ? batch.batch_date : null,
+          batchNumber: line.batch_number,
+          netAmount: batch ? batch.net_amount : null,
+          invoiceLineId: line.invoice_line_id,
+          invoiceAmount: line.amount,
+          message: batch
+            ? `Batch number matches but amounts differ (invoice ${Math.abs(Number(line.amount))} vs batch ${batch.net_amount}).`
+            : "Batch number matches but amounts differ.",
+        });
+      }
+    }
+
+    return {
+      runId: run.id,
+      runAt: run.run_at,
+      invoiceId: invoice.id,
+      invoiceNumber: invoice.invoice_number,
+      periodStart: invoice.period_start,
+      periodEnd: invoice.period_end,
+      summary: {
+        scopedBatchCount: run.scoped_batch_count,
+        lineCount: lines.length,
+        matchedCount: run.matched_count,
+        missingFromInvoiceCount: run.missing_from_invoice_count,
+        unmatchedLineCount: run.unmatched_line_count,
+        ambiguousLineCount: lines.filter((line) => line.match_status === "ambiguous").length,
+        mismatchCount: run.mismatch_count,
+        totalDeposit: run.total_deposit,
+        totalFee: run.total_fee,
+        totalCredit: run.total_credit,
+        invoiceTotal: invoice.invoice_total,
+        creditDiscrepancy: run.credit_discrepancy,
+        totalMissingCredit: Math.round(totalMissingCredit * 100) / 100,
+      },
+      matched,
+      exceptions,
+    };
   }
 
   return {
@@ -466,12 +801,19 @@ function createStoreManager(storesDir) {
     close,
     getBatches,
     getBatchCount,
+    deleteBatch,
+    deleteBatchSource,
     getStoreInfo,
     updateStore,
     insertBatches,
     insertInvoice,
     getInvoices,
     getInvoiceLines,
+    deleteInvoice,
+    getInvoiceForReconcile,
+    getBatchesInPeriod,
+    reconcileInvoice,
+    getLastReconciliationRun,
     getCurrentStoreName: () => currentStoreName,
     normalizeSiteId,
   };

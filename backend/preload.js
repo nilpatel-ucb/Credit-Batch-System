@@ -9,10 +9,16 @@ contextBridge.exposeInMainWorld("api", {
   getBatchCount: () => ipcRenderer.invoke("batches:count"),
   insertBatches: (records, sourcePdf) =>
     ipcRenderer.invoke("batches:insert", records, sourcePdf),
+  deleteBatch: (batchId) => ipcRenderer.invoke("batches:delete", batchId),
+  deleteBatchSource: (sourcePdf, ingestedAt) =>
+    ipcRenderer.invoke("batches:delete-source", sourcePdf, ingestedAt),
   insertInvoice: (summary, batchLines, pdfFilename) =>
     ipcRenderer.invoke("invoices:insert", summary, batchLines, pdfFilename),
   getInvoices: () => ipcRenderer.invoke("invoices:list"),
   getInvoiceLines: (invoiceId) => ipcRenderer.invoke("invoices:lines", invoiceId),
+  deleteInvoice: (invoiceId) => ipcRenderer.invoke("invoices:delete", invoiceId),
+  reconcileInvoice: (invoiceId) => ipcRenderer.invoke("reconcile:run", invoiceId),
+  getLastReconciliation: (invoiceId) => ipcRenderer.invoke("reconcile:last", invoiceId),
   parseChevronPdf: (buffer) => {
     const bytes =
       buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;

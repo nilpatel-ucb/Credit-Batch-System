@@ -315,6 +315,176 @@ function testRejectDuplicateInvoiceNumber() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+function testDeleteBatchRemovesRow() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+  manager.insertBatches(
+    [
+      {
+        site_id: "309359",
+        batch_date: "2026-03-31",
+        batch_number: "0341",
+        gross_amount: 2643.8,
+        total_fee: 65.44,
+        net_amount: 2578.36,
+      },
+      {
+        site_id: "309359",
+        batch_date: "2026-03-31",
+        batch_number: "0857",
+        gross_amount: 2781.16,
+        total_fee: 68.62,
+        net_amount: 2712.54,
+      },
+    ],
+    "test.pdf"
+  );
+
+  const batches = manager.getBatches();
+  const result = manager.deleteBatch(batches[0].id);
+
+  assert.strictEqual(result.batchCount, 1);
+  assert.strictEqual(manager.getBatches().length, 1);
+  assert.strictEqual(manager.getBatches()[0].batch_number, "0857");
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function testDeleteMatchedBatchClearsInvoiceLineLink() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+  manager.insertBatches(
+    [
+      {
+        site_id: "309359",
+        batch_date: "2026-03-30",
+        batch_number: "0319",
+        gross_amount: 2900,
+        total_fee: 82.27,
+        net_amount: 2817.73,
+      },
+    ],
+    "chevron.pdf"
+  );
+
+  const { summary, batchLines } = sampleInvoicePayload();
+  const insertResult = manager.insertInvoice(summary, batchLines, "eft.pdf");
+  const matchedBatch = manager.getBatches().find((batch) => batch.batch_number === "0319");
+  assert.ok(matchedBatch);
+  assert.strictEqual(matchedBatch.match_status, "matched");
+
+  manager.deleteBatch(matchedBatch.id);
+
+  const lines = manager.getInvoiceLines(insertResult.invoiceId);
+  const line = lines.find((entry) => entry.invoice_line_id === "AAE0319");
+  assert.ok(line);
+  assert.strictEqual(line.match_status, "unmatched");
+  assert.strictEqual(line.batch_id, null);
+  assert.strictEqual(manager.getBatchCount(), 0);
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function testDeleteBatchSourceRemovesEntireUpload() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+  manager.insertBatches(
+    [
+      {
+        site_id: "309359",
+        batch_date: "2026-03-31",
+        batch_number: "0341",
+        gross_amount: 2643.8,
+        total_fee: 65.44,
+        net_amount: 2578.36,
+      },
+      {
+        site_id: "309359",
+        batch_date: "2026-03-31",
+        batch_number: "0857",
+        gross_amount: 2781.16,
+        total_fee: 68.62,
+        net_amount: 2712.54,
+      },
+    ],
+    "upload-a.pdf"
+  );
+  manager.insertBatches(
+    [
+      {
+        site_id: "309359",
+        batch_date: "2026-04-01",
+        batch_number: "0100",
+        gross_amount: 1000,
+        total_fee: 10,
+        net_amount: 990,
+      },
+    ],
+    "upload-b.pdf"
+  );
+
+  const uploadA = manager.getBatches().find((batch) => batch.source_pdf === "upload-a.pdf");
+  assert.ok(uploadA);
+
+  const result = manager.deleteBatchSource("upload-a.pdf", uploadA.ingested_at);
+  assert.strictEqual(result.deletedCount, 2);
+  assert.strictEqual(manager.getBatchCount(), 1);
+  assert.strictEqual(manager.getBatches()[0].source_pdf, "upload-b.pdf");
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function testDeleteInvoiceRemovesHeaderLinesAndResetsLinkedBatches() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+  manager.insertBatches(
+    [
+      {
+        site_id: "309359",
+        batch_date: "2026-03-30",
+        batch_number: "0319",
+        gross_amount: 2900,
+        total_fee: 82.27,
+        net_amount: 2817.73,
+      },
+    ],
+    "chevron.pdf"
+  );
+
+  const { summary, batchLines } = sampleInvoicePayload();
+  const insertResult = manager.insertInvoice(summary, batchLines, "eft.pdf");
+  const batch = manager.getBatches().find((row) => row.batch_number === "0319");
+  assert.strictEqual(batch.match_status, "matched");
+
+  const deleted = manager.deleteInvoice(insertResult.invoiceId);
+  assert.strictEqual(deleted.invoiceNumber, "0600658");
+  assert.strictEqual(deleted.lineCount, 2);
+  assert.strictEqual(deleted.invoiceCount, 0);
+  assert.strictEqual(manager.getInvoices().length, 0);
+
+  const resetBatch = manager.getBatches()[0];
+  assert.strictEqual(resetBatch.match_status, "unmatched");
+  assert.strictEqual(resetBatch.invoice_line_id, null);
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 function run() {
   testCreateInsertAndCount();
   testDedupeOnInsert();
@@ -327,6 +497,10 @@ function run() {
   testSchemaCreated();
   testInsertInvoicePersistsHeaderAndLines();
   testRejectDuplicateInvoiceNumber();
+  testDeleteBatchRemovesRow();
+  testDeleteMatchedBatchClearsInvoiceLineLink();
+  testDeleteBatchSourceRemovesEntireUpload();
+  testDeleteInvoiceRemovesHeaderLinesAndResetsLinkedBatches();
   console.log("PASS store tests");
 }
 
