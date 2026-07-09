@@ -1,0 +1,26 @@
+{
+  "name": "credit-batch-software",
+  "version": "1.0.0",
+  "description": "Credit Batch Reconciler — desktop app for Chevron batch settlement and EFT invoice reconciliation",
+  "main": "backend/main.js",
+  "scripts": {
+    "start": "npm run rebuild:electron && env -u ELECTRON_RUN_AS_NODE electron .",
+    "setup": "node scripts/postinstall.js",
+    "rebuild:node": "npm rebuild better-sqlite3",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
+    "test": "npm run rebuild:node && node test/reconciling/store.test.js && node test/parsing/chevron-parser-regression.test.js",
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "pdfjs-dist": "3.11.174"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "electron": "^35.0.0"
+  }
+}

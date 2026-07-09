@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Credit Batch Reconciler</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div class="container">
+    <header class="app-header">
+      <h1>Credit Batch Reconciler</h1>
+      <p class="subtitle">Per-store batch ledger — Chevron settlement ingest</p>
+    </header>
+
+    <div class="layout">
+      <aside class="panel store-panel">
+        <h2>Stores</h2>
+        <div id="store-list" class="store-list"></div>
+        <form id="create-store-form" class="create-store-form">
+          <input type="text" id="new-store-name" placeholder="New store name" required>
+          <button type="submit">Create store</button>
+        </form>
+        <p id="active-store" class="active-store">No store selected</p>
+      </aside>
+
+      <main class="panel main-panel">
+        <section class="ingest-section">
+          <h2>Add Chevron PDF</h2>
+          <div id="dropzone" class="dropzone" tabindex="0">
+            <p>Drop a Chevron settlement PDF here, or click to browse</p>
+            <input type="file" id="pdf-input" accept="application/pdf" hidden>
+          </div>
+          <div id="ingest-status" class="status-message" hidden></div>
+          <div id="warnings-panel" class="warnings-panel" hidden>
+            <h3>Parser warnings</h3>
+            <ul id="warnings-list"></ul>
+          </div>
+          <div id="preview-section" class="preview-section" hidden>
+            <h3>Preview (<span id="preview-count">0</span> batches)</h3>
+            <div class="table-wrap">
+              <table id="preview-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Batch #</th>
+                    <th>Credit</th>
+                    <th>Fee</th>
+                    <th>After Fee Credit</th>
+                    <th>Site ID</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="preview-actions">
+              <button type="button" id="confirm-ingest-btn" class="primary">Confirm and save</button>
+              <button type="button" id="cancel-preview-btn">Cancel</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="batches-section">
+          <div class="section-header">
+            <h2>Batches <span id="batch-count-badge" class="badge">0</span></h2>
+          </div>
+          <div class="table-wrap">
+            <table id="batches-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Batch #</th>
+                  <th>Gross</th>
+                  <th>Fee</th>
+                  <th>Net</th>
+                  <th>Site ID</th>
+                  <th>Source PDF</th>
+                  <th>Ingested</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="empty-row">
+                  <td colspan="8">Open a store to view batches</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script src="js/store-selector.js"></script>
+  <script src="js/batch-ingest-ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
