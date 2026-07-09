@@ -16,6 +16,105 @@ function sanitizeStoreName(name) {
   return sanitized;
 }
 
+function normalizeSiteId(siteId) {
+  const normalized = String(siteId || "").trim();
+  if (!/^\d{5,6}$/.test(normalized)) {
+    throw new Error("Site ID must be a 5–6 digit Chevron site number.");
+  }
+  return normalized;
+}
+
+function readStoreMeta(database) {
+  try {
+    return database.prepare("SELECT site_id, name, created_at FROM store_meta WHERE id = 1").get() || null;
+  } catch {
+    return null;
+  }
+}
+
+function insertStoreMeta(database, name, siteId) {
+  database
+    .prepare(
+      `INSERT INTO store_meta (id, site_id, name, created_at)
+       VALUES (1, @site_id, @name, @created_at)`
+    )
+    .run({
+      site_id: normalizeSiteId(siteId),
+      name: sanitizeStoreName(name),
+      created_at: new Date().toISOString(),
+    });
+}
+
+function upsertStoreMeta(database, name, siteId) {
+  const existing = readStoreMeta(database);
+  const payload = {
+    site_id: normalizeSiteId(siteId),
+    name: sanitizeStoreName(name),
+  };
+  if (existing) {
+    database
+      .prepare(`UPDATE store_meta SET site_id = @site_id, name = @name WHERE id = 1`)
+      .run(payload);
+    return;
+  }
+  insertStoreMeta(database, payload.name, payload.site_id);
+}
+
+function inferStoreMetaFromBatches(database, storeName) {
+  const rows = database.prepare("SELECT DISTINCT site_id FROM batches WHERE site_id != ''").all();
+  if (rows.length !== 1) {
+    return null;
+  }
+  insertStoreMeta(database, storeName, rows[0].site_id);
+  return readStoreMeta(database);
+}
+
+function ensureStoreMeta(database, storeName) {
+  const existing = readStoreMeta(database);
+  if (existing) {
+    return existing;
+  }
+  return inferStoreMetaFromBatches(database, storeName);
+}
+
+function readStoreMetaFromFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  const database = new Database(filePath);
+  try {
+    migrate(database);
+    return readStoreMeta(database);
+  } finally {
+    database.close();
+  }
+}
+
+function assertRecordsMatchStoreSite(records, storeSiteId) {
+  const expected = normalizeSiteId(storeSiteId);
+  const seen = new Set();
+
+  for (const raw of records) {
+    const record = Normalize.toDbRecord(raw);
+    const recordSiteId = String(record.site_id || "").trim();
+    if (!recordSiteId) {
+      throw new Error("PDF batch records are missing a site ID.");
+    }
+    seen.add(recordSiteId);
+    if (recordSiteId !== expected) {
+      throw new Error(
+        `PDF site ID ${recordSiteId} does not match this store's site ID ${expected}. Open the correct store before saving.`
+      );
+    }
+  }
+
+  if (seen.size > 1) {
+    throw new Error(
+      `PDF contains multiple site IDs (${[...seen].join(", ")}). Upload one site per PDF.`
+    );
+  }
+}
+
 function createStoreManager(storesDir) {
   fs.mkdirSync(storesDir, { recursive: true });
 
@@ -36,13 +135,15 @@ function createStoreManager(storesDir) {
 
   function openDatabase(name) {
     close();
-    const filePath = dbPath(name);
+    const storeName = sanitizeStoreName(name);
+    const filePath = dbPath(storeName);
     if (!fs.existsSync(filePath)) {
-      throw new Error(`Store "${name}" does not exist.`);
+      throw new Error(`Store "${storeName}" does not exist.`);
     }
     db = new Database(filePath);
     migrate(db);
-    currentStoreName = sanitizeStoreName(name);
+    ensureStoreMeta(db, storeName);
+    currentStoreName = storeName;
     return db;
   }
 
@@ -50,26 +151,45 @@ function createStoreManager(storesDir) {
     return fs
       .readdirSync(storesDir)
       .filter((file) => file.endsWith(".db"))
-      .map((file) => path.basename(file, ".db"))
-      .sort((a, b) => a.localeCompare(b));
+      .map((file) => {
+        const name = path.basename(file, ".db");
+        const meta = readStoreMetaFromFile(path.join(storesDir, file));
+        return {
+          name,
+          site_id: meta ? meta.site_id : null,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  function createStore(name) {
+  function createStore(name, siteId) {
     const storeName = sanitizeStoreName(name);
+    const normalizedSiteId = normalizeSiteId(siteId);
     const filePath = dbPath(storeName);
     if (fs.existsSync(filePath)) {
       throw new Error(`Store "${storeName}" already exists.`);
     }
+
+    const duplicate = listStores().find((store) => store.site_id === normalizedSiteId);
+    if (duplicate) {
+      throw new Error(
+        `Site ID ${normalizedSiteId} is already linked to store "${duplicate.name}".`
+      );
+    }
+
     const newDb = new Database(filePath);
     migrate(newDb);
+    insertStoreMeta(newDb, storeName, normalizedSiteId);
     newDb.close();
-    return { name: storeName };
+    return { name: storeName, site_id: normalizedSiteId };
   }
 
   function openStore(name) {
     openDatabase(name);
+    const meta = readStoreMeta(requireDb());
     return {
       name: currentStoreName,
+      site_id: meta ? meta.site_id : null,
       batchCount: getBatchCount(),
     };
   }
@@ -79,6 +199,16 @@ function createStoreManager(storesDir) {
       throw new Error("No store is open. Select or create a store first.");
     }
     return db;
+  }
+
+  function getStoreInfo() {
+    const database = requireDb();
+    const meta = ensureStoreMeta(database, currentStoreName);
+    return {
+      name: currentStoreName,
+      site_id: meta ? meta.site_id : null,
+      batchCount: getBatchCount(),
+    };
   }
 
   function getBatchCount() {
@@ -99,6 +229,15 @@ function createStoreManager(storesDir) {
 
   function insertBatches(records, sourcePdf) {
     const database = requireDb();
+    const meta = ensureStoreMeta(database, currentStoreName);
+    if (!meta || !meta.site_id) {
+      throw new Error(
+        "This store has no linked site ID. Create a new store with a site ID, or add batches that all share one site ID first."
+      );
+    }
+
+    assertRecordsMatchStoreSite(records, meta.site_id);
+
     const ingestedAt = new Date().toISOString();
     const insert = database.prepare(
       `INSERT OR IGNORE INTO batches (
@@ -139,6 +278,58 @@ function createStoreManager(storesDir) {
     return { added, skipped };
   }
 
+  function updateStore(name, siteId) {
+    const database = requireDb();
+    const oldName = currentStoreName;
+    const meta = ensureStoreMeta(database, oldName);
+    const newName = sanitizeStoreName(name);
+    const newSiteId = normalizeSiteId(siteId);
+
+    const duplicate = listStores().find(
+      (store) => store.site_id === newSiteId && store.name !== oldName
+    );
+    if (duplicate) {
+      throw new Error(
+        `Site ID ${newSiteId} is already linked to store "${duplicate.name}".`
+      );
+    }
+
+    const currentSiteId = meta ? meta.site_id : null;
+    if (currentSiteId !== newSiteId) {
+      const batchSiteIds = database
+        .prepare("SELECT DISTINCT site_id FROM batches WHERE site_id != ''")
+        .all()
+        .map((row) => row.site_id);
+      if (batchSiteIds.some((id) => id !== newSiteId)) {
+        throw new Error(
+          "Cannot change site ID while this store has batches tied to a different site ID."
+        );
+      }
+    }
+
+    upsertStoreMeta(database, newName, newSiteId);
+
+    if (newName !== oldName) {
+      const oldPath = dbPath(oldName);
+      const newPath = dbPath(newName);
+      if (fs.existsSync(newPath)) {
+        throw new Error(`Store "${newName}" already exists.`);
+      }
+      db.close();
+      db = null;
+      fs.renameSync(oldPath, newPath);
+      db = new Database(newPath);
+      migrate(db);
+      currentStoreName = newName;
+    }
+
+    return {
+      name: currentStoreName,
+      site_id: newSiteId,
+      batchCount: getBatchCount(),
+    };
+  }
+
   return {
     listStores,
     createStore,
@@ -146,9 +337,17 @@ function createStoreManager(storesDir) {
     close,
     getBatches,
     getBatchCount,
+    getStoreInfo,
+    updateStore,
     insertBatches,
     getCurrentStoreName: () => currentStoreName,
+    normalizeSiteId,
   };
 }
 
-module.exports = { createStoreManager, sanitizeStoreName };
+module.exports = {
+  createStoreManager,
+  sanitizeStoreName,
+  normalizeSiteId,
+  assertRecordsMatchStoreSite,
+};

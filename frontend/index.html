@@ -18,11 +18,21 @@
       <aside class="panel store-panel">
         <h2>Stores</h2>
         <div id="store-list" class="store-list"></div>
-        <form id="create-store-form" class="create-store-form">
-          <input type="text" id="new-store-name" placeholder="New store name" required>
+        <form id="create-store-form" class="store-form">
+          <input type="text" id="new-store-name" placeholder="Store name" required>
+          <input type="text" id="new-store-site-id" placeholder="Chevron site ID (5–6 digits)" required pattern="\d{5,6}" inputmode="numeric" title="Enter the 5–6 digit site ID from Chevron PDFs">
           <button type="submit">Create store</button>
         </form>
         <p id="active-store" class="active-store">No store selected</p>
+        <section id="edit-store-section" class="edit-store-section" hidden>
+          <h3>Edit active store</h3>
+          <form id="edit-store-form" class="store-form">
+            <input type="text" id="edit-store-name" placeholder="Store name" required>
+            <input type="text" id="edit-store-site-id" placeholder="Chevron site ID (5–6 digits)" required pattern="\d{5,6}" inputmode="numeric" title="Enter the 5–6 digit site ID from Chevron PDFs">
+            <button type="submit">Save changes</button>
+          </form>
+          <p id="edit-store-status" class="edit-store-status" hidden></p>
+        </section>
       </aside>
 <!-- this is where we have columns for the preview table -->
       <main class="panel main-panel">

@@ -2,8 +2,9 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
   listStores: () => ipcRenderer.invoke("stores:list"),
-  createStore: (name) => ipcRenderer.invoke("stores:create", name),
+  createStore: (name, siteId) => ipcRenderer.invoke("stores:create", name, siteId),
   openStore: (name) => ipcRenderer.invoke("stores:open", name),
+  updateStore: (name, siteId) => ipcRenderer.invoke("stores:update", name, siteId),
   getBatches: () => ipcRenderer.invoke("batches:list"),
   getBatchCount: () => ipcRenderer.invoke("batches:count"),
   insertBatches: (records, sourcePdf) =>

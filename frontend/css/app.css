@@ -78,6 +78,7 @@ body {
   font-weight: 600;
 }
 
+.store-form,
 .create-store-form {
   display: flex;
   flex-direction: column;
@@ -85,11 +86,38 @@ body {
   margin-bottom: 0.75rem;
 }
 
+.store-form input,
 .create-store-form input {
   padding: 0.5rem 0.65rem;
   border: 1px solid #ccd4dc;
   border-radius: 6px;
   font-size: 0.9rem;
+}
+
+.edit-store-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #eef2f6;
+}
+
+.edit-store-section h3 {
+  margin: 0 0 0.65rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.edit-store-status {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #5c6670;
+}
+
+.edit-store-status.error {
+  color: #b91c1c;
+}
+
+.edit-store-status.success {
+  color: #15803d;
 }
 
 button {

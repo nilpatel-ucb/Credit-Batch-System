@@ -36,9 +36,17 @@ function createWindow() {
 function registerIpcHandlers() {
   ipcMain.handle("stores:list", () => storeManager.listStores());
 
-  ipcMain.handle("stores:create", (_event, name) => storeManager.createStore(name));
+  ipcMain.handle("stores:create", (_event, name, siteId) =>
+    storeManager.createStore(name, siteId)
+  );
+
+  ipcMain.handle("stores:info", () => storeManager.getStoreInfo());
 
   ipcMain.handle("stores:open", (_event, name) => storeManager.openStore(name));
+
+  ipcMain.handle("stores:update", (_event, name, siteId) =>
+    storeManager.updateStore(name, siteId)
+  );
 
   ipcMain.handle("batches:list", () => storeManager.getBatches());
 
@@ -47,7 +55,7 @@ function registerIpcHandlers() {
   ipcMain.handle("batches:insert", (_event, records, sourcePdf) =>
     storeManager.insertBatches(records, sourcePdf)
   );
-
+//if parsing is empty throw an error
   ipcMain.handle("parse:chevron", async (_event, buffer) => {
     const { parseChevronPdf } = require("./parsing/chevron-pipeline");
     const { toUint8Array } = require("./parsing/buffer-utils");

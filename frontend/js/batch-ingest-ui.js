@@ -57,6 +57,44 @@ const BatchIngestUI = (() => {
       .join("");
   }
 
+  function getPdfSiteIds(records) {
+    return [...new Set(records.map((r) => String(r.site_id || "").trim()).filter(Boolean))];
+  }
+
+  function validateRecordsForStore(records) {
+    const expectedSiteId = StoreSelector.getActiveSiteId();
+    if (!expectedSiteId) {
+      return {
+        ok: false,
+        message:
+          "This store has no linked site ID. Create a new store with a Chevron site ID before uploading.",
+      };
+    }
+
+    const pdfSiteIds = getPdfSiteIds(records);
+    if (pdfSiteIds.length === 0) {
+      return { ok: false, message: "No site ID found in the parsed PDF." };
+    }
+    if (pdfSiteIds.length > 1) {
+      return {
+        ok: false,
+        message: `PDF contains multiple site IDs (${pdfSiteIds.join(", ")}). Upload one site per PDF.`,
+      };
+    }
+    if (pdfSiteIds[0] !== expectedSiteId) {
+      return {
+        ok: false,
+        message: `Wrong store: PDF is for site ${pdfSiteIds[0]}, but "${StoreSelector.getActiveStore()}" is linked to site ${expectedSiteId}.`,
+      };
+    }
+
+    return { ok: true };
+  }
+
+  function setConfirmEnabled(enabled) {
+    document.getElementById("confirm-ingest-btn").disabled = !enabled;
+  }
+
   function clearPreview() {
     pendingRecords = [];
     pendingFilename = "";
@@ -65,6 +103,7 @@ const BatchIngestUI = (() => {
     document.querySelector("#preview-table tbody").innerHTML = "";
     showWarnings([]);
     hideStatus();
+    setConfirmEnabled(true);
   }
 
   function renderPreview(records) {
@@ -114,10 +153,19 @@ const BatchIngestUI = (() => {
         return;
       }
 
+      const validation = validateRecordsForStore(pendingRecords);
       renderPreview(pendingRecords);
       showWarnings(result.warnings);
+
+      if (!validation.ok) {
+        setConfirmEnabled(false);
+        showStatus(validation.message, "error");
+        return;
+      }
+
+      setConfirmEnabled(true);
       showStatus(
-        `Parsed ${pendingRecords.length} batch${pendingRecords.length === 1 ? "" : "es"} from ${file.name}. Review and confirm.`,
+        `Parsed ${pendingRecords.length} batch${pendingRecords.length === 1 ? "" : "es"} from ${file.name}. Site ${StoreSelector.getActiveSiteId()} matches — review and confirm.`,
         "info"
       );
     } catch (err) {

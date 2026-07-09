@@ -43,11 +43,10 @@ const App = (() => {
 
   async function onIngestComplete() {
     await renderBatches();
-    const count = await window.api.getBatchCount();
     const activeStore = StoreSelector.getActiveStore();
     if (activeStore) {
-      document.getElementById("active-store").textContent =
-        `Active: ${activeStore} (${count} batches)`;
+      const result = await window.api.openStore(activeStore);
+      StoreSelector.setActiveStoreInfo(result.name, result.site_id, result.batchCount);
     }
   }
 

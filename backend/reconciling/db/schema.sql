@@ -2,6 +2,13 @@ CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS store_meta (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  site_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS batches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   site_id TEXT NOT NULL,
