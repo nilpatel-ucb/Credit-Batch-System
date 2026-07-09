@@ -30,10 +30,12 @@ CREATE TABLE IF NOT EXISTS invoices (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   invoice_number TEXT NOT NULL,
   invoice_total REAL NOT NULL,
+  invoice_balance REAL,
   pdf_filename TEXT,
   processed_at TEXT NOT NULL,
   period_start TEXT,
-  period_end TEXT
+  period_end TEXT,
+  UNIQUE (invoice_number)
 );
 
 CREATE TABLE IF NOT EXISTS invoice_lines (

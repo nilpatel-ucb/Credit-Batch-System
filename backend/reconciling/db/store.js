@@ -330,6 +330,135 @@ function createStoreManager(storesDir) {
     };
   }
 
+  function computeInvoicePeriod(batchLines) {
+    if (!batchLines.length) {
+      return { periodStart: null, periodEnd: null };
+    }
+
+    const dates = batchLines
+      .map((line) => line.inv_date)
+      .filter(Boolean)
+      .sort();
+
+    return {
+      periodStart: dates[0],
+      periodEnd: dates[dates.length - 1],
+    };
+  }
+
+  function formatProcessedAt(iso) {
+    if (!iso) return "a previous date";
+    const d = new Date(iso);
+    return d.toLocaleString();
+  }
+
+  function insertInvoice(summary, batchLines, pdfFilename) {
+    const database = requireDb();
+
+    if (!summary || !summary.invoiceNumber) {
+      throw new Error("Invoice summary is missing an invoice number.");
+    }
+
+    const invoiceNumber = String(summary.invoiceNumber).trim();
+    if (!invoiceNumber) {
+      throw new Error("Invoice number is required.");
+    }
+
+    if (!batchLines || batchLines.length === 0) {
+      throw new Error("Invoice has no AA batch lines to save.");
+    }
+
+    const existing = database
+      .prepare(`SELECT id, processed_at FROM invoices WHERE invoice_number = ?`)
+      .get(invoiceNumber);
+
+    if (existing) {
+      throw new Error(
+        `Invoice ${invoiceNumber} was already uploaded on ${formatProcessedAt(existing.processed_at)}.`
+      );
+    }
+
+    const normalizedLines = batchLines.map((line) => Normalize.toInvoiceDbLine(line));
+    const { periodStart, periodEnd } = computeInvoicePeriod(normalizedLines);
+    const processedAt = new Date().toISOString();
+
+    const insertInvoiceStmt = database.prepare(
+      `INSERT INTO invoices (
+         invoice_number, invoice_total, invoice_balance, pdf_filename, processed_at, period_start, period_end
+       ) VALUES (
+         @invoice_number, @invoice_total, @invoice_balance, @pdf_filename, @processed_at, @period_start, @period_end
+       )`
+    );
+
+    const insertLineStmt = database.prepare(
+      `INSERT INTO invoice_lines (
+         invoice_id, invoice_line_id, batch_number, amount, inv_date, match_status
+       ) VALUES (
+         @invoice_id, @invoice_line_id, @batch_number, @amount, @inv_date, @match_status
+       )`
+    );
+
+    let invoiceId = null;
+
+    const run = database.transaction(() => {
+      const result = insertInvoiceStmt.run({
+        invoice_number: invoiceNumber,
+        invoice_total: Number(summary.amount),
+        invoice_balance: summary.balance == null ? null : Number(summary.balance),
+        pdf_filename: pdfFilename || null,
+        processed_at: processedAt,
+        period_start: periodStart,
+        period_end: periodEnd,
+      });
+      invoiceId = result.lastInsertRowid;
+
+      for (const line of normalizedLines) {
+        insertLineStmt.run({
+          invoice_id: invoiceId,
+          invoice_line_id: line.invoice_line_id,
+          batch_number: line.batch_number,
+          amount: line.amount,
+          inv_date: line.inv_date,
+          match_status: "unmatched",
+        });
+      }
+    });
+
+    run();
+
+    return {
+      invoiceId,
+      lineCount: normalizedLines.length,
+      periodStart,
+      periodEnd,
+    };
+  }
+
+  function getInvoices() {
+    return requireDb()
+      .prepare(
+        `SELECT i.id, i.invoice_number, i.invoice_total, i.invoice_balance, i.pdf_filename,
+                i.processed_at, i.period_start, i.period_end,
+                COUNT(l.id) AS line_count
+         FROM invoices i
+         LEFT JOIN invoice_lines l ON l.invoice_id = i.id
+         GROUP BY i.id
+         ORDER BY i.processed_at DESC`
+      )
+      .all();
+  }
+
+  function getInvoiceLines(invoiceId) {
+    return requireDb()
+      .prepare(
+        `SELECT id, invoice_line_id, batch_number, amount, inv_date, match_status
+         FROM invoice_lines
+         WHERE invoice_id = ?
+         ORDER BY inv_date, invoice_line_id`
+      )
+      .all(invoiceId);
+  }
+
   return {
     listStores,
     createStore,
@@ -340,6 +469,9 @@ function createStoreManager(storesDir) {
     getStoreInfo,
     updateStore,
     insertBatches,
+    insertInvoice,
+    getInvoices,
+    getInvoiceLines,
     getCurrentStoreName: () => currentStoreName,
     normalizeSiteId,
   };

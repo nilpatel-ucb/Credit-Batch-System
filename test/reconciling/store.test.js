@@ -241,6 +241,80 @@ function testRejectSiteIdChangeWhenBatchesExist() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+function sampleInvoicePayload() {
+  return {
+    summary: { invoiceNumber: "0600658", amount: 35381.95, balance: -4267.8 },
+    batchLines: [
+      {
+        invoiceId: "AAE0319",
+        batchNumber: "0319",
+        amount: -2817.73,
+        invDate: "2026-03-30",
+      },
+      {
+        invoiceId: "AAU9086",
+        batchNumber: "9086",
+        amount: -1500,
+        invDate: "2026-03-29",
+      },
+    ],
+  };
+}
+
+function testInsertInvoicePersistsHeaderAndLines() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+
+  const { summary, batchLines } = sampleInvoicePayload();
+  const result = manager.insertInvoice(summary, batchLines, "eft.pdf");
+
+  assert.ok(result.invoiceId > 0);
+  assert.strictEqual(result.lineCount, 2);
+  assert.strictEqual(result.periodStart, "2026-03-29");
+  assert.strictEqual(result.periodEnd, "2026-03-30");
+
+  const invoices = manager.getInvoices();
+  assert.strictEqual(invoices.length, 1);
+  assert.strictEqual(invoices[0].invoice_number, "0600658");
+  assert.strictEqual(invoices[0].invoice_total, 35381.95);
+  assert.strictEqual(invoices[0].invoice_balance, -4267.8);
+  assert.strictEqual(invoices[0].line_count, 2);
+  assert.strictEqual(invoices[0].period_start, "2026-03-29");
+  assert.strictEqual(invoices[0].period_end, "2026-03-30");
+
+  const lines = manager.getInvoiceLines(result.invoiceId);
+  assert.strictEqual(lines.length, 2);
+  assert.ok(lines.every((line) => line.match_status === "unmatched"));
+  const byId = Object.fromEntries(lines.map((line) => [line.invoice_line_id, line]));
+  assert.strictEqual(byId.AAE0319.batch_number, "0319");
+  assert.strictEqual(byId.AAU9086.batch_number, "9086");
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function testRejectDuplicateInvoiceNumber() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+
+  const { summary, batchLines } = sampleInvoicePayload();
+  manager.insertInvoice(summary, batchLines, "eft-a.pdf");
+
+  assert.throws(
+    () => manager.insertInvoice(summary, batchLines, "eft-b.pdf"),
+    /was already uploaded/
+  );
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 function run() {
   testCreateInsertAndCount();
   testDedupeOnInsert();
@@ -251,6 +325,8 @@ function run() {
   testUpdateStoreNameAndSiteId();
   testRejectSiteIdChangeWhenBatchesExist();
   testSchemaCreated();
+  testInsertInvoicePersistsHeaderAndLines();
+  testRejectDuplicateInvoiceNumber();
   console.log("PASS store tests");
 }
 

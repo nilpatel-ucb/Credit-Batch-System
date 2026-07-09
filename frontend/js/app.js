@@ -1,4 +1,9 @@
 const App = (() => {
+  function formatPeriod(start, end) {
+    if (!start || !end) return "";
+    return `${StoreSelector.formatDate(start)} – ${StoreSelector.formatDate(end)}`;
+  }
+
   async function renderBatches() {
     const tbody = document.querySelector("#batches-table tbody");
     const activeStore = StoreSelector.getActiveStore();
@@ -35,13 +40,49 @@ const App = (() => {
       .join("");
   }
 
+  async function renderInvoices() {
+    const tbody = document.querySelector("#invoices-table tbody");
+    const activeStore = StoreSelector.getActiveStore();
+
+    if (!activeStore) {
+      tbody.innerHTML =
+        '<tr class="empty-row"><td colspan="7">Open a store to view invoices</td></tr>';
+      document.getElementById("invoice-count-badge").textContent = "0";
+      return;
+    }
+
+    const invoices = await window.api.getInvoices();
+    document.getElementById("invoice-count-badge").textContent = String(invoices.length);
+
+    if (invoices.length === 0) {
+      tbody.innerHTML =
+        '<tr class="empty-row"><td colspan="7">No invoices yet — upload an EFT PDF</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = invoices
+      .map(
+        (invoice) => `<tr>
+          <td>${invoice.invoice_number}</td>
+          <td class="num">${StoreSelector.formatMoney(invoice.invoice_total)}</td>
+          <td class="num">${invoice.invoice_balance == null ? "" : StoreSelector.formatMoney(invoice.invoice_balance)}</td>
+          <td>${formatPeriod(invoice.period_start, invoice.period_end)}</td>
+          <td>${invoice.line_count}</td>
+          <td>${invoice.pdf_filename || ""}</td>
+          <td>${StoreSelector.formatDateTime(invoice.processed_at)}</td>
+        </tr>`
+      )
+      .join("");
+  }
+
   async function onStoreChange() {
     const active = !!StoreSelector.getActiveStore();
     BatchIngestUI.setStoreOpen(active);
-    await renderBatches();
+    InvoiceIngestUI.setStoreOpen(active);
+    await Promise.all([renderBatches(), renderInvoices()]);
   }
 
-  async function onIngestComplete() {
+  async function onBatchIngestComplete() {
     await renderBatches();
     const activeStore = StoreSelector.getActiveStore();
     if (activeStore) {
@@ -50,9 +91,14 @@ const App = (() => {
     }
   }
 
+  async function onInvoiceIngestComplete() {
+    await renderInvoices();
+  }
+
   function init() {
     StoreSelector.init({ onStoreChange });
-    BatchIngestUI.init({ onIngestComplete });
+    BatchIngestUI.init({ onIngestComplete: onBatchIngestComplete });
+    InvoiceIngestUI.init({ onIngestComplete: onInvoiceIngestComplete });
   }
 
   return { init };

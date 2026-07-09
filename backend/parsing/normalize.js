@@ -19,7 +19,7 @@ const Normalize = (() => {
     const stripped = String(batchNumber).replace(/^0+/, "");
     return stripped || "0";
   }
-
+  //raw is the raw record from the template
   function normalizeRecord(raw) {
     return {
       site_id: raw.site_id || "",
@@ -74,6 +74,43 @@ const Normalize = (() => {
     }));
   }
 
+  function serializeInvoiceSummary(summary) {
+    if (!summary) {
+      return null;
+    }
+    return {
+      invoiceNumber: String(summary.invoiceNumber),
+      amount: Number(summary.amount),
+      balance: summary.balance == null ? null : Number(summary.balance),
+    };
+  }
+
+  function serializeInvoiceBatchLines(batchLines) {
+    return (batchLines || []).map((line) => ({
+      invoiceId: String(line.invoiceId),
+      batchNumber: String(line.batchNumber),
+      amount: Number(line.amount),
+      invDate:
+        line.invDate instanceof Date ? toISODate(line.invDate) : toISODate(line.invDate),
+    }));
+  }
+
+  function serializeInvoiceForIpc(summary, batchLines) {
+    return {
+      summary: serializeInvoiceSummary(summary),
+      batchLines: serializeInvoiceBatchLines(batchLines),
+    };
+  }
+
+  function toInvoiceDbLine(line) {
+    return {
+      invoice_line_id: String(line.invoiceId),
+      batch_number: String(line.batchNumber),
+      amount: Number(line.amount),
+      inv_date: line.invDate instanceof Date ? toISODate(line.invDate) : String(line.invDate),
+    };
+  }
+
   return {
     normalizeAll,
     toDbRecord,
@@ -81,6 +118,10 @@ const Normalize = (() => {
     formatDisplayDate,
     stripLeadingZeros,
     serializeForIpc,
+    serializeInvoiceForIpc,
+    serializeInvoiceSummary,
+    serializeInvoiceBatchLines,
+    toInvoiceDbLine,
   };
 })();
 

@@ -11,7 +11,7 @@
   <div class="container">
     <header class="app-header">
       <h1>Credit Batch Reconciler</h1>
-      <p class="subtitle">Per-store batch ledger — Chevron settlement ingest</p>
+      <p class="subtitle">Per-store batch ledger — Chevron settlement and EFT invoice ingest</p>
     </header>
 
     <div class="layout">
@@ -71,6 +71,45 @@
           </div>
         </section>
 
+        <section class="ingest-section invoice-ingest-section">
+          <h2>Add EFT PDF</h2>
+          <div id="invoice-dropzone" class="dropzone" tabindex="0">
+            <p>Drop an EFT prenotification PDF here, or click to browse</p>
+            <input type="file" id="invoice-pdf-input" accept="application/pdf" hidden>
+          </div>
+          <div id="invoice-ingest-status" class="status-message" hidden></div>
+          <div id="invoice-warnings-panel" class="warnings-panel" hidden>
+            <h3>Parser warnings</h3>
+            <ul id="invoice-warnings-list"></ul>
+          </div>
+          <div id="invoice-preview-section" class="preview-section" hidden>
+            <div class="invoice-summary-card">
+              <p><strong>Invoice #:</strong> <span id="invoice-summary-number">—</span></p>
+              <p><strong>Total:</strong> <span id="invoice-summary-total">—</span></p>
+              <p><strong>Balance:</strong> <span id="invoice-summary-balance">—</span></p>
+              <p><strong>Period:</strong> <span id="invoice-summary-period">—</span></p>
+            </div>
+            <h3>Preview (<span id="invoice-preview-count">0</span> lines)</h3>
+            <div class="table-wrap">
+              <table id="invoice-preview-table">
+                <thead>
+                  <tr>
+                    <th>Invoice Line ID</th>
+                    <th>Batch #</th>
+                    <th>Date</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="preview-actions">
+              <button type="button" id="confirm-invoice-btn" class="primary">Confirm and save</button>
+              <button type="button" id="cancel-invoice-preview-btn">Cancel</button>
+            </div>
+          </div>
+        </section>
+
         <section class="batches-section">
           <div class="section-header">
             <h2>Batches <span id="batch-count-badge" class="badge">0</span></h2>
@@ -98,12 +137,39 @@
             </table>
           </div>
         </section>
+
+        <section class="invoices-section">
+          <div class="section-header">
+            <h2>Invoices <span id="invoice-count-badge" class="badge">0</span></h2>
+          </div>
+          <div class="table-wrap">
+            <table id="invoices-table">
+              <thead>
+                <tr>
+                  <th>Invoice #</th>
+                  <th>Total</th>
+                  <th>Balance</th>
+                  <th>Period</th>
+                  <th>Lines</th>
+                  <th>Source PDF</th>
+                  <th>Processed</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="empty-row">
+                  <td colspan="7">Open a store to view invoices</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </main>
     </div>
   </div>
 
   <script src="js/store-selector.js"></script>
   <script src="js/batch-ingest-ui.js"></script>
+  <script src="js/invoice-ingest-ui.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

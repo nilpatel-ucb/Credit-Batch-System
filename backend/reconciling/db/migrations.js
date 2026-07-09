@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 4;
 
 function getSchemaSql() {
   return fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
@@ -42,6 +42,37 @@ function migrateToV2(db) {
   setSchemaVersion(db, 2);
 }
 
+function migrateToV3(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS invoices_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_number TEXT NOT NULL UNIQUE,
+      invoice_total REAL NOT NULL,
+      pdf_filename TEXT,
+      processed_at TEXT NOT NULL,
+      period_start TEXT,
+      period_end TEXT
+    );
+
+    INSERT INTO invoices_new (id, invoice_number, invoice_total, pdf_filename, processed_at, period_start, period_end)
+    SELECT id, invoice_number, invoice_total, pdf_filename, processed_at, period_start, period_end
+    FROM invoices;
+
+    DROP TABLE invoices;
+    ALTER TABLE invoices_new RENAME TO invoices;
+  `);
+  setSchemaVersion(db, 3);
+}
+
+function migrateToV4(db) {
+  const columns = db.prepare("PRAGMA table_info(invoices)").all();
+  const hasBalance = columns.some((column) => column.name === "invoice_balance");
+  if (!hasBalance) {
+    db.exec(`ALTER TABLE invoices ADD COLUMN invoice_balance REAL;`);
+  }
+  setSchemaVersion(db, 4);
+}
+
 function migrate(db) {
   let version = getSchemaVersion(db);
 
@@ -52,6 +83,16 @@ function migrate(db) {
 
   if (version < 2) {
     migrateToV2(db);
+    version = 2;
+  }
+
+  if (version < 3) {
+    migrateToV3(db);
+    version = 3;
+  }
+
+  if (version < 4) {
+    migrateToV4(db);
   }
 }
 

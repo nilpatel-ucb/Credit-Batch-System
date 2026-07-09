@@ -55,6 +55,16 @@ function registerIpcHandlers() {
   ipcMain.handle("batches:insert", (_event, records, sourcePdf) =>
     storeManager.insertBatches(records, sourcePdf)
   );
+
+  ipcMain.handle("invoices:insert", (_event, summary, batchLines, pdfFilename) =>
+    storeManager.insertInvoice(summary, batchLines, pdfFilename)
+  );
+
+  ipcMain.handle("invoices:list", () => storeManager.getInvoices());
+
+  ipcMain.handle("invoices:lines", (_event, invoiceId) =>
+    storeManager.getInvoiceLines(invoiceId)
+  );
 //if parsing is empty throw an error
   ipcMain.handle("parse:chevron", async (_event, buffer) => {
     const { parseChevronPdf } = require("./parsing/chevron-pipeline");
@@ -64,6 +74,16 @@ function registerIpcHandlers() {
       throw new Error("The PDF file is empty.");
     }
     return parseChevronPdf(bytes);
+  });
+
+  ipcMain.handle("parse:eft", async (_event, buffer) => {
+    const { parseEftPdf } = require("./parsing/eft-pipeline");
+    const { toUint8Array } = require("./parsing/buffer-utils");
+    const bytes = toUint8Array(buffer);
+    if (bytes.byteLength === 0) {
+      throw new Error("The PDF file is empty.");
+    }
+    return parseEftPdf(bytes);
   });
 }
 

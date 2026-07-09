@@ -255,6 +255,34 @@ button:disabled {
   font-size: 0.95rem;
 }
 
+.invoice-ingest-section {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #eef2f6;
+}
+
+.invoices-section {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #eef2f6;
+}
+
+.invoice-summary-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  margin-bottom: 0.5rem;
+  padding: 0.75rem;
+  background: #f8fafc;
+  border: 1px solid #eef2f6;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.invoice-summary-card p {
+  margin: 0;
+}
+
 .preview-actions {
   display: flex;
   gap: 0.5rem;
