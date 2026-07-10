@@ -397,6 +397,98 @@ function testAmountMismatchIsFlaggedSeparately() {
   assert.strictEqual(result.unmatchedLines.length, 0);
 }
 
+function testMismatchCannotStealExactMatch() {
+  // Line A (earlier date, wrong amount) must not consume the batch that
+  // line B matches exactly.
+  const batches = [
+    {
+      id: 1,
+      batch_date: "2026-03-30",
+      batch_number: "435",
+      gross_amount: 1100,
+      total_fee: 100,
+      net_amount: 1000,
+    },
+  ];
+
+  const result = reconcile({
+    invoice: {
+      id: 1,
+      invoice_number: "X",
+      invoice_total: 1000,
+      period_start: "2026-03-29",
+      period_end: "2026-03-30",
+    },
+    lines: [
+      {
+        id: 1,
+        invoice_line_id: "AAA0435",
+        batch_number: "435",
+        amount: -900,
+        inv_date: "2026-03-29",
+      },
+      {
+        id: 2,
+        invoice_line_id: "AAB0435",
+        batch_number: "435",
+        amount: -1000,
+        inv_date: "2026-03-30",
+      },
+    ],
+    scopedBatches: batches,
+  });
+
+  assert.strictEqual(result.matchedPairs.length, 1);
+  assert.strictEqual(result.matchedPairs[0].line.invoice_line_id, "AAB0435");
+  assert.strictEqual(result.mismatchPairs.length, 0);
+  assert.strictEqual(result.unmatchedLines.length, 1);
+  assert.strictEqual(result.unmatchedLines[0].line.invoice_line_id, "AAA0435");
+}
+
+function testMismatchPairsWithClosestDateBatch() {
+  const batches = [
+    {
+      id: 1,
+      batch_date: "2026-03-20",
+      batch_number: "500",
+      gross_amount: 1100,
+      total_fee: 100,
+      net_amount: 1000,
+    },
+    {
+      id: 2,
+      batch_date: "2026-03-30",
+      batch_number: "500",
+      gross_amount: 2200,
+      total_fee: 200,
+      net_amount: 2000,
+    },
+  ];
+
+  const result = reconcile({
+    invoice: {
+      id: 1,
+      invoice_number: "X",
+      invoice_total: 1500,
+      period_start: "2026-03-20",
+      period_end: "2026-03-30",
+    },
+    lines: [
+      {
+        id: 1,
+        invoice_line_id: "AAA0500",
+        batch_number: "500",
+        amount: -1500,
+        inv_date: "2026-03-30",
+      },
+    ],
+    scopedBatches: batches,
+  });
+
+  assert.strictEqual(result.mismatchPairs.length, 1);
+  assert.strictEqual(result.mismatchPairs[0].batch.id, 2);
+}
+
 function run() {
   testHappyPathMatch();
   testMissingBatchCountedInTotalMissingCredit();
@@ -407,6 +499,8 @@ function run() {
   testAmbiguousWhenCandidatesTied();
   testCreditDiscrepancyUsesMatchedNetsOnly();
   testBatchOutsideInvoicePeriodStillMatchesByNumberAndAmount();
+  testMismatchCannotStealExactMatch();
+  testMismatchPairsWithClosestDateBatch();
   testAmountMismatchIsFlaggedSeparately();
   testStoreReconcileIntegration();
   console.log("PASS reconcile tests");

@@ -207,7 +207,7 @@ const InvoiceIngestUI = (() => {
         batchLines,
         warnings,
         valid: false,
-        error: "No AA batch lines found in this invoice.",
+        error: "No batch lines found in this invoice.",
       };
     }
 

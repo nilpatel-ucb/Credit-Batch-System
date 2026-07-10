@@ -49,6 +49,37 @@ function testLastNonAaLineWinsForSummary() {
   assert.strictEqual(summary.balance, -100);
 }
 
+function testMixedPrefixBatchLinesExtracted() {
+  const lines = [
+    "Invoice # Inv Date Due Date Amount",
+    "--------- --------- --------- ---------",
+    "AAE0319 03/30/26 03/30/26 -2,817.73 .00 -2,817.73",
+    "ABE0004 01/20/26 01/20/26 -103.84 .00 -103.84",
+    "ABF0007 01/20/26 01/20/26 -1,448.89 .00 -1,448.89",
+    "ABK0001 01/20/26 01/20/26 -2,155.27 .00 -2,155.27",
+    "0600658 03/24/26 04/01/26 35,381.95 .00 35,381.95",
+    "-4,267.80 .00 -4,267.80",
+  ];
+
+  const { batchLines, summary, warnings } = EftInvoiceTemplate.extractFromLines(lines);
+
+  assert.strictEqual(warnings.length, 0);
+  assert.strictEqual(batchLines.length, 4);
+
+  assert.strictEqual(batchLines[1].invoiceId, "ABE0004");
+  assert.strictEqual(batchLines[1].batchNumber, "0004");
+  assert.strictEqual(batchLines[1].amount, -103.84);
+
+  assert.strictEqual(batchLines[3].invoiceId, "ABK0001");
+  assert.strictEqual(batchLines[3].batchNumber, "0001");
+  assert.strictEqual(batchLines[3].amount, -2155.27);
+
+  assert.ok(summary);
+  assert.strictEqual(summary.invoiceNumber, "0600658");
+  assert.strictEqual(summary.amount, 35381.95);
+  assert.strictEqual(summary.balance, -4267.8);
+}
+
 function testNoiseLinesSkipped() {
   const lines = [
     "",
@@ -74,7 +105,7 @@ function testNoAaLinesEmitsWarning() {
 
   assert.strictEqual(batchLines.length, 0);
   assert.strictEqual(warnings.length, 2);
-  assert.ok(warnings.some((w) => /No AA-prefixed batch lines/i.test(w.message)));
+  assert.ok(warnings.some((w) => /No letter-prefixed batch lines/i.test(w.message)));
   assert.ok(warnings.some((w) => /footer balance/i.test(w.message)));
 }
 
@@ -169,6 +200,7 @@ async function testRealEftFixturePdf() {
 
 async function run() {
   testAaBatchLinesExtracted();
+  testMixedPrefixBatchLinesExtracted();
   testLastNonAaLineWinsForSummary();
   testNoiseLinesSkipped();
   testNoAaLinesEmitsWarning();

@@ -261,6 +261,7 @@ const BatchIngestUI = (() => {
 
     let totalAdded = 0;
     let totalSkipped = 0;
+    let lastReconciliation = null;
     const errors = [];
 
     try {
@@ -268,12 +269,19 @@ const BatchIngestUI = (() => {
         const result = await window.api.insertBatches(item.records, item.filename);
         totalAdded += result.added;
         totalSkipped += result.skipped;
+        lastReconciliation = result.reconciliation || lastReconciliation;
       }
 
-      showStatus(
+      const statusParts = [
         `Added ${totalAdded} batch${totalAdded === 1 ? "" : "es"} from ${items.length} file${items.length === 1 ? "" : "s"}, ${totalSkipped} duplicate${totalSkipped === 1 ? "" : "s"} skipped.`,
-        "success"
-      );
+      ];
+      const summary = lastReconciliation?.summary;
+      if (summary) {
+        statusParts.push(
+          `Reconciled: ${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} missing from invoices, ${summary.unmatchedLineCount} unmatched lines.`
+        );
+      }
+      showStatus(statusParts.join(" "), "success");
       clearPreview();
       if (onComplete) await onComplete();
     } catch (err) {

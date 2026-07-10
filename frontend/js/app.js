@@ -278,10 +278,20 @@ const App = (() => {
 
   async function onBatchIngestComplete() {
     await renderBatches();
+    await renderInvoices();
     const activeStore = StoreSelector.getActiveStore();
     if (activeStore) {
       const result = await window.api.openStore(activeStore);
       StoreSelector.setActiveStoreInfo(result.name, result.site_id, result.batchCount);
+    }
+    await ReconcileUI.refresh();
+    if (selectedInvoiceId != null) {
+      const row = document.querySelector(
+        `#invoices-table tr[data-invoice-id="${selectedInvoiceId}"]`
+      );
+      const invoiceNumber = row ? row.dataset.invoiceNumber : "—";
+      await showInvoiceLines(selectedInvoiceId, invoiceNumber);
+      highlightSelectedInvoiceRow();
     }
   }
 
@@ -328,6 +338,7 @@ const App = (() => {
       await window.api.deleteInvoice(invoiceId);
       clearInvoiceLinesPanel();
       await Promise.all([renderInvoices(), renderBatches()]);
+      await ReconcileUI.refresh();
     } catch (err) {
       window.alert(err.message || "Failed to delete invoice.");
     }

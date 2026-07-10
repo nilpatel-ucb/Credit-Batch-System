@@ -127,7 +127,7 @@ const EftInvoiceTemplate = (() => {
 
       const [, invoiceId, invDateStr, , amountStr] = match;
 
-      if (/^AA/i.test(invoiceId)) {
+      if (/^[A-Za-z]/.test(invoiceId)) {
         const batchNumber = extractBatchNumber(invoiceId);
         if (!batchNumber) {
           warnings.push({
@@ -157,7 +157,7 @@ const EftInvoiceTemplate = (() => {
     if (batchLines.length === 0) {
       warnings.push({
         line: 0,
-        message: "No AA-prefixed batch lines found in invoice",
+        message: "No letter-prefixed batch lines found in invoice",
       });
     }
 

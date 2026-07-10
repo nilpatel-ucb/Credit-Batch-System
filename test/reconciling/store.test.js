@@ -485,6 +485,116 @@ function testDeleteInvoiceRemovesHeaderLinesAndResetsLinkedBatches() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+function testBatchIngestAfterInvoiceAutoReconciles() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+
+  // Invoice uploaded first: its lines start out unmatched.
+  const { summary, batchLines } = sampleInvoicePayload();
+  const insertResult = manager.insertInvoice(summary, batchLines, "eft.pdf");
+  let lines = manager.getInvoiceLines(insertResult.invoiceId);
+  assert.ok(lines.every((line) => line.match_status === "unmatched"));
+
+  // Uploading the matching Chevron batch afterwards must re-reconcile.
+  const batchResult = manager.insertBatches(
+    [
+      {
+        site_id: "309359",
+        batch_date: "2026-03-30",
+        batch_number: "0319",
+        gross_amount: 2900,
+        total_fee: 82.27,
+        net_amount: 2817.73,
+      },
+    ],
+    "chevron.pdf"
+  );
+
+  assert.ok(batchResult.reconciliation);
+  assert.strictEqual(batchResult.reconciliation.summary.matchedCount, 1);
+
+  const batch = manager.getBatches().find((row) => row.batch_number === "0319");
+  assert.strictEqual(batch.match_status, "matched");
+
+  lines = manager.getInvoiceLines(insertResult.invoiceId);
+  const line = lines.find((entry) => entry.invoice_line_id === "AAE0319");
+  assert.strictEqual(line.match_status, "matched");
+  assert.strictEqual(line.batch_id, batch.id);
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function testBatchIngestWithoutInvoicesLeavesBatchesUnmatched() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+
+  const result = manager.insertBatches(
+    [
+      {
+        site_id: "309359",
+        batch_date: "2026-03-31",
+        batch_number: "0341",
+        gross_amount: 2643.8,
+        total_fee: 65.44,
+        net_amount: 2578.36,
+      },
+    ],
+    "chevron.pdf"
+  );
+
+  assert.strictEqual(result.reconciliation, null);
+  assert.strictEqual(manager.getBatches()[0].match_status, "unmatched");
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function testDeleteInvoiceClearsMissingFromInvoiceFlags() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+
+  // Batch that matches no invoice line — reconciliation flags it missing.
+  manager.insertBatches(
+    [
+      {
+        site_id: "309359",
+        batch_date: "2026-03-31",
+        batch_number: "0341",
+        gross_amount: 2643.8,
+        total_fee: 65.44,
+        net_amount: 2578.36,
+      },
+    ],
+    "chevron.pdf"
+  );
+
+  const { summary, batchLines } = sampleInvoicePayload();
+  const insertResult = manager.insertInvoice(summary, batchLines, "eft.pdf");
+
+  let batch = manager.getBatches()[0];
+  assert.strictEqual(batch.match_status, "missing_from_invoice");
+
+  manager.deleteInvoice(insertResult.invoiceId);
+
+  batch = manager.getBatches()[0];
+  assert.strictEqual(batch.match_status, "unmatched");
+  assert.strictEqual(batch.last_reconciled_at, null);
+  assert.strictEqual(manager.getStoreReconciliation(), null);
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 function run() {
   testCreateInsertAndCount();
   testDedupeOnInsert();
@@ -501,6 +611,9 @@ function run() {
   testDeleteMatchedBatchClearsInvoiceLineLink();
   testDeleteBatchSourceRemovesEntireUpload();
   testDeleteInvoiceRemovesHeaderLinesAndResetsLinkedBatches();
+  testBatchIngestAfterInvoiceAutoReconciles();
+  testBatchIngestWithoutInvoicesLeavesBatchesUnmatched();
+  testDeleteInvoiceClearsMissingFromInvoiceFlags();
   console.log("PASS store tests");
 }
 

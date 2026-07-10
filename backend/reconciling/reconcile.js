@@ -90,17 +90,21 @@ function findBatchCandidates(line, scopedBatches, usedBatchIds) {
 function findAmountMismatchBatch(line, matchableBatches, usedBatchIds) {
   const targetNumber = normalizeBatchNumber(line.batch_number);
 
-  return (
-    matchableBatches.find((batch) => {
-      if (usedBatchIds.has(batch.id)) {
-        return false;
-      }
-      if (normalizeBatchNumber(batch.batch_number) !== targetNumber) {
-        return false;
-      }
-      return !amountsMatch(line.amount, batch.net_amount);
-    }) || null
-  );
+  const candidates = matchableBatches.filter((batch) => {
+    if (usedBatchIds.has(batch.id)) {
+      return false;
+    }
+    if (normalizeBatchNumber(batch.batch_number) !== targetNumber) {
+      return false;
+    }
+    return !amountsMatch(line.amount, batch.net_amount);
+  });
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return [...candidates].sort((a, b) => compareBatchCandidates(a, b, line.inv_date))[0];
 }
 
 function buildSummary(
@@ -145,6 +149,10 @@ function reconcile({ invoice, invoiceTotal, lines, scopedBatches, matchableBatch
   const ambiguousLines = [];
   const mismatchPairs = [];
 
+  // Pass 1: exact matches (batch number + amount) for every line first, so a
+  // mismatch pairing can never consume a batch another line matches exactly.
+  const leftoverLines = [];
+
   for (const line of lines) {
     const candidates = findBatchCandidates(line, searchableBatches, usedBatchIds);
     const { batch, ambiguous } = pickBatchCandidate(candidates, line.inv_date);
@@ -164,6 +172,12 @@ function reconcile({ invoice, invoiceTotal, lines, scopedBatches, matchableBatch
       continue;
     }
 
+    leftoverLines.push(line);
+  }
+
+  // Pass 2: only lines with no exact match may claim a same-number batch as an
+  // amount mismatch.
+  for (const line of leftoverLines) {
     const mismatchBatch = findAmountMismatchBatch(line, searchableBatches, usedBatchIds);
     if (mismatchBatch) {
       usedBatchIds.add(mismatchBatch.id);

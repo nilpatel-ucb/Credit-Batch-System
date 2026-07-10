@@ -3,7 +3,7 @@ const path = require("path");
 const Database = require("better-sqlite3");
 const { migrate } = require("./migrations");
 const Normalize = require("../../parsing/normalize");
-const { runStoreReconciliation } = require("../reconcile-service");
+const { runStoreReconciliation, resetStoreReconciliationState } = require("../reconcile-service");
 
 function sanitizeStoreName(name) {
   const trimmed = String(name || "").trim();
@@ -217,6 +217,21 @@ function createStoreManager(storesDir) {
     return row.c;
   }
 
+  /**
+   * Bring stored match statuses back in sync after any batch/invoice mutation.
+   * Re-runs the full reconciliation when invoices exist; otherwise resets all
+   * flags so nothing is left claiming "missing" against zero invoices.
+   */
+  function resyncReconciliation() {
+    const database = requireDb();
+    const invoiceCount = database.prepare("SELECT COUNT(*) AS c FROM invoices").get().c;
+    if (invoiceCount > 0) {
+      return reconcileStore();
+    }
+    resetStoreReconciliationState(database);
+    return null;
+  }
+
   function getBatches() {
     return requireDb()
       .prepare(
@@ -286,6 +301,8 @@ function createStoreManager(storesDir) {
 
     run();
 
+    const reconciliation = resyncReconciliation();
+
     return {
       id: batch.id,
       batchDate: batch.batch_date,
@@ -293,6 +310,7 @@ function createStoreManager(storesDir) {
       netAmount: batch.net_amount,
       wasMatched: batch.match_status === "matched",
       batchCount: getBatchCount(),
+      reconciliation,
     };
   }
 
@@ -330,12 +348,15 @@ function createStoreManager(storesDir) {
 
     run();
 
+    const reconciliation = resyncReconciliation();
+
     return {
       sourcePdf: batches[0].source_pdf || "",
       ingestedAt: batches[0].ingested_at,
       deletedCount,
       matchedCount,
       batchCount: getBatchCount(),
+      reconciliation,
     };
   }
 
@@ -387,7 +408,10 @@ function createStoreManager(storesDir) {
     });
 
     run(records);
-    return { added, skipped };
+
+    const reconciliation = resyncReconciliation();
+
+    return { added, skipped, reconciliation };
   }
 
   function updateStore(name, siteId) {
@@ -477,7 +501,7 @@ function createStoreManager(storesDir) {
     }
 
     if (!batchLines || batchLines.length === 0) {
-      throw new Error("Invoice has no AA batch lines to save.");
+      throw new Error("Invoice has no batch lines to save.");
     }
 
     const existing = database
@@ -598,19 +622,6 @@ function createStoreManager(storesDir) {
       .get(id).c;
 
     const run = database.transaction(() => {
-      database
-        .prepare(
-          `UPDATE batches
-           SET match_status = 'unmatched',
-               invoice_line_id = NULL,
-               invoice_amount = NULL,
-               last_reconciled_at = NULL
-           WHERE id IN (
-             SELECT batch_id FROM invoice_lines WHERE invoice_id = ? AND batch_id IS NOT NULL
-           )`
-        )
-        .run(id);
-
       database.prepare(`DELETE FROM reconciliation_runs WHERE invoice_id = ?`).run(id);
       database.prepare(`DELETE FROM invoice_lines WHERE invoice_id = ?`).run(id);
       database.prepare(`DELETE FROM invoices WHERE id = ?`).run(id);
@@ -618,12 +629,17 @@ function createStoreManager(storesDir) {
 
     run();
 
+    // Resets every batch flag (including missing_from_invoice rows that had no
+    // line link) and re-reconciles against whatever invoices remain.
+    const reconciliation = resyncReconciliation();
+
     return {
       invoiceId: invoice.id,
       invoiceNumber: invoice.invoice_number,
       pdfFilename: invoice.pdf_filename || "",
       lineCount,
       invoiceCount: database.prepare(`SELECT COUNT(*) AS c FROM invoices`).get().c,
+      reconciliation,
     };
   }
 
