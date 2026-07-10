@@ -78,13 +78,11 @@ function registerIpcHandlers() {
     storeManager.deleteInvoice(invoiceId)
   );
 
-  ipcMain.handle("reconcile:run", (_event, invoiceId) =>
-    storeManager.reconcileInvoice(invoiceId)
-  );
+  ipcMain.handle("reconcile:run", () => storeManager.reconcileStore());
 
-  ipcMain.handle("reconcile:last", (_event, invoiceId) =>
-    storeManager.getLastReconciliationRun(invoiceId)
-  );
+  ipcMain.handle("reconcile:last", () => storeManager.getStoreReconciliation());
+
+  ipcMain.handle("reconcile:scope", () => storeManager.getReconciliationScope());
 //if parsing is empty throw an error
   ipcMain.handle("parse:chevron", async (_event, buffer) => {
     const { parseChevronPdf } = require("./parsing/chevron-pipeline");

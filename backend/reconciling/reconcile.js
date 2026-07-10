@@ -104,7 +104,7 @@ function findAmountMismatchBatch(line, matchableBatches, usedBatchIds) {
 }
 
 function buildSummary(
-  invoice,
+  invoiceTotal,
   scopedBatches,
   matchedPairs,
   missingBatches,
@@ -116,7 +116,7 @@ function buildSummary(
   const totalFee = matchedPairs.reduce((sum, pair) => sum + Number(pair.batch.total_fee), 0);
   const totalCredit = matchedPairs.reduce((sum, pair) => sum + Number(pair.batch.net_amount), 0);
   const totalMissingCredit = missingBatches.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
-  const invoiceTotal = Number(invoice.invoice_total);
+  const normalizedInvoiceTotal = round2(Number(invoiceTotal || 0));
 
   return {
     scopedBatchCount: scopedBatches.length,
@@ -129,13 +129,15 @@ function buildSummary(
     totalDeposit: round2(totalDeposit),
     totalFee: round2(totalFee),
     totalCredit: round2(totalCredit),
-    invoiceTotal: round2(invoiceTotal),
-    creditDiscrepancy: round2(invoiceTotal - totalCredit),
+    invoiceTotal: normalizedInvoiceTotal,
+    creditDiscrepancy: round2(normalizedInvoiceTotal - totalCredit),
     totalMissingCredit: round2(totalMissingCredit),
   };
 }
 
-function reconcile({ invoice, lines, scopedBatches, matchableBatches }) {
+function reconcile({ invoice, invoiceTotal, lines, scopedBatches, matchableBatches }) {
+  const resolvedInvoiceTotal =
+    invoiceTotal != null ? invoiceTotal : invoice ? Number(invoice.invoice_total) : 0;
   const searchableBatches = matchableBatches || scopedBatches;
   const usedBatchIds = new Set();
   const matchedPairs = [];
@@ -180,11 +182,11 @@ function reconcile({ invoice, lines, scopedBatches, matchableBatches }) {
     .filter((batch) => !usedBatchIds.has(batch.id))
     .map((batch) => ({
       batch,
-      message: "Batch is in the invoice period but has no matching invoice line.",
+      message: "Batch has no matching invoice line.",
     }));
 
   const summary = buildSummary(
-    invoice,
+    resolvedInvoiceTotal,
     scopedBatches,
     matchedPairs,
     missingBatches.map((entry) => entry.batch),

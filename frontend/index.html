@@ -39,8 +39,8 @@
         <section class="ingest-section">
           <h2>Add Chevron PDF</h2>
           <div id="dropzone" class="dropzone" tabindex="0">
-            <p>Drop a Chevron settlement PDF here, or click to browse</p>
-            <input type="file" id="pdf-input" accept="application/pdf" hidden>
+            <p>Drop one or more Chevron settlement PDFs here, or click to browse</p>
+            <input type="file" id="pdf-input" accept="application/pdf" multiple hidden>
           </div>
           <div id="ingest-status" class="status-message" hidden></div>
           <div id="warnings-panel" class="warnings-panel" hidden>
@@ -48,7 +48,7 @@
             <ul id="warnings-list"></ul>
           </div>
           <div id="preview-section" class="preview-section" hidden>
-            <h3>Preview (<span id="preview-count">0</span> batches)</h3>
+            <h3>Preview (<span id="preview-count">0</span> batches<span id="preview-file-count"></span>)</h3>
             <div class="table-wrap">
               <table id="preview-table">
                 <thead>
@@ -74,8 +74,8 @@
         <section class="ingest-section invoice-ingest-section">
           <h2>Add EFT PDF</h2>
           <div id="invoice-dropzone" class="dropzone" tabindex="0">
-            <p>Drop an EFT prenotification PDF here, or click to browse</p>
-            <input type="file" id="invoice-pdf-input" accept="application/pdf" hidden>
+            <p>Drop one or more EFT prenotification PDFs here, or click to browse</p>
+            <input type="file" id="invoice-pdf-input" accept="application/pdf" multiple hidden>
           </div>
           <div id="invoice-ingest-status" class="status-message" hidden></div>
           <div id="invoice-warnings-panel" class="warnings-panel" hidden>
@@ -83,13 +83,14 @@
             <ul id="invoice-warnings-list"></ul>
           </div>
           <div id="invoice-preview-section" class="preview-section" hidden>
-            <div class="invoice-summary-card">
+            <div id="invoice-preview-files" class="invoice-preview-files" hidden></div>
+            <div id="invoice-preview-single-summary" class="invoice-summary-card">
               <p><strong>Invoice #:</strong> <span id="invoice-summary-number">—</span></p>
               <p><strong>Total:</strong> <span id="invoice-summary-total">—</span></p>
               <p><strong>Balance:</strong> <span id="invoice-summary-balance">—</span></p>
               <p><strong>Period:</strong> <span id="invoice-summary-period">—</span></p>
             </div>
-            <h3>Preview (<span id="invoice-preview-count">0</span> lines)</h3>
+            <h3>Preview (<span id="invoice-preview-count">0</span> lines<span id="invoice-preview-file-count"></span>)</h3>
             <div class="table-wrap">
               <table id="invoice-preview-table">
                 <thead>
@@ -154,7 +155,6 @@
                     <th>Fee</th>
                     <th>Total After Fee Credit</th>
                     <th>Site ID</th>
-                    <th>Status</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -167,7 +167,7 @@
         <section class="invoices-section">
           <div class="section-header">
             <h2>Invoices <span id="invoice-count-badge" class="badge">0</span></h2>
-            <p class="section-hint">Click an invoice to view lines, reconcile, or delete an entire invoice upload</p>
+            <p class="section-hint">Click an invoice to view lines, or delete an entire invoice upload</p>
           </div>
           <div class="table-wrap">
             <table id="invoices-table">
@@ -194,7 +194,6 @@
             <div class="detail-panel-header">
               <h3>Invoice lines — <span id="invoice-lines-title">—</span></h3>
               <div class="detail-panel-actions">
-                <button type="button" id="invoice-lines-reconcile-btn" class="primary">Reconcile</button>
                 <button type="button" id="invoice-lines-delete-btn" class="danger" hidden>Delete invoice</button>
                 <button type="button" id="collapse-invoice-lines-btn" class="collapse-btn">Collapse</button>
               </div>
@@ -207,92 +206,102 @@
                     <th>Batch #</th>
                     <th>Date</th>
                     <th>Amount</th>
-                    <th>Status</th>
                   </tr>
                 </thead>
                 <tbody></tbody>
               </table>
             </div>
           </div>
+        </section>
 
-          <div id="reconcile-section" class="detail-panel reconcile-section" hidden>
-            <div class="detail-panel-header">
-              <h3>Reconciliation — <span id="reconcile-invoice-number">—</span></h3>
-              <div class="reconcile-header-actions">
-                <button type="button" id="reconcile-run-btn" class="primary">Reconcile</button>
-                <button type="button" id="collapse-reconcile-btn" class="collapse-btn">Collapse</button>
-              </div>
+        <section id="reconciliation-section" class="reconciliation-section">
+          <div class="section-header">
+            <h2>Reconciliation</h2>
+            <p class="section-hint">Match all batches against all invoice lines — green is matched, red is missing or unmatched</p>
+          </div>
+
+          <div class="reconcile-controls">
+            <button type="button" id="reconcile-run-btn" class="primary" disabled>Reconcile store</button>
+          </div>
+
+          <div id="reconcile-status" class="status-message" hidden></div>
+
+          <div class="reconcile-summary-grid">
+            <div class="reconcile-summary-item">
+              <span class="label">Total Deposit</span>
+              <span id="reconcile-total-deposit" class="value">—</span>
             </div>
-
-            <div id="reconcile-status" class="status-message" hidden></div>
-
-            <div class="reconcile-summary-grid">
-              <div class="reconcile-summary-item">
-                <span class="label">Total Deposit</span>
-                <span id="reconcile-total-deposit" class="value">—</span>
-              </div>
-              <div class="reconcile-summary-item">
-                <span class="label">Total Fee</span>
-                <span id="reconcile-total-fee" class="value">—</span>
-              </div>
-              <div class="reconcile-summary-item">
-                <span class="label">Matched Credit</span>
-                <span id="reconcile-total-credit" class="value">—</span>
-              </div>
-              <div class="reconcile-summary-item">
-                <span class="label">Invoice Amount</span>
-                <span id="reconcile-invoice-amount" class="value">—</span>
-              </div>
-              <div class="reconcile-summary-item">
-                <span class="label">Credit Discrepancy</span>
-                <span id="reconcile-credit-gap" class="value">—</span>
-              </div>
-              <div class="reconcile-summary-item reconcile-summary-item-emphasis">
-                <span class="label">Missing Credit</span>
-                <span id="reconcile-missing-credit" class="value">—</span>
-              </div>
+            <div class="reconcile-summary-item">
+              <span class="label">Total Fee</span>
+              <span id="reconcile-total-fee" class="value">—</span>
             </div>
-
-            <p id="reconcile-coverage" class="reconcile-coverage"></p>
-            <p id="reconcile-coverage-warning" class="reconcile-coverage-warning" hidden>
-              Review missing batches and unmatched lines before treating the credit discrepancy as final.
-            </p>
-
-            <h4 class="reconcile-subheading">Exceptions</h4>
-            <div class="table-wrap">
-              <table id="reconcile-exceptions-table">
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>Batch #</th>
-                    <th>Batch Date</th>
-                    <th>Amount</th>
-                    <th>Invoice Line</th>
-                    <th>Message</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
+            <div class="reconcile-summary-item">
+              <span class="label">Matched Credit</span>
+              <span id="reconcile-total-credit" class="value">—</span>
             </div>
+            <div class="reconcile-summary-item">
+              <span class="label">Total Invoiced</span>
+              <span id="reconcile-invoice-amount" class="value">—</span>
+            </div>
+            <div class="reconcile-summary-item">
+              <span class="label">Credit Discrepancy</span>
+              <span id="reconcile-credit-gap" class="value">—</span>
+            </div>
+            <div class="reconcile-summary-item reconcile-summary-item-emphasis">
+              <span class="label">Missing Credit</span>
+              <span id="reconcile-missing-credit" class="value">—</span>
+            </div>
+          </div>
 
-            <details class="reconcile-matched-details">
-              <summary>Matched batches</summary>
+          <p id="reconcile-coverage" class="reconcile-coverage"></p>
+          <p id="reconcile-coverage-warning" class="reconcile-coverage-warning" hidden>
+            Review missing batches and unmatched lines before treating the credit discrepancy as final.
+          </p>
+
+          <div class="reconcile-comparison-grid">
+            <div class="reconcile-comparison-panel">
+              <h4 class="reconcile-subheading">All batches <span id="reconcile-batch-count" class="badge">0</span></h4>
               <div class="table-wrap">
-                <table id="reconcile-matched-table">
+                <table id="reconcile-batches-table">
                   <thead>
                     <tr>
-                      <th>Batch Date</th>
+                      <th>Date</th>
                       <th>Batch #</th>
                       <th>Net Amount</th>
-                      <th>Invoice Line</th>
-                      <th>Line Date</th>
-                      <th>Invoice Amount</th>
+                      <th>Status</th>
                     </tr>
                   </thead>
-                  <tbody></tbody>
+                  <tbody>
+                    <tr class="empty-row">
+                      <td colspan="4">Open a store with batches to reconcile</td>
+                    </tr>
+                  </tbody>
                 </table>
               </div>
-            </details>
+            </div>
+
+            <div class="reconcile-comparison-panel">
+              <h4 class="reconcile-subheading">All invoice lines <span id="reconcile-line-count" class="badge">0</span></h4>
+              <div class="table-wrap">
+                <table id="reconcile-lines-table">
+                  <thead>
+                    <tr>
+                      <th>Invoice #</th>
+                      <th>Invoice Line ID</th>
+                      <th>Batch #</th>
+                      <th>Date</th>
+                      <th>Amount</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr class="empty-row">
+                      <td colspan="6">Open a store with invoices to reconcile</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </section>
       </main>

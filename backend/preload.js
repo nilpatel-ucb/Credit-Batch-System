@@ -17,8 +17,9 @@ contextBridge.exposeInMainWorld("api", {
   getInvoices: () => ipcRenderer.invoke("invoices:list"),
   getInvoiceLines: (invoiceId) => ipcRenderer.invoke("invoices:lines", invoiceId),
   deleteInvoice: (invoiceId) => ipcRenderer.invoke("invoices:delete", invoiceId),
-  reconcileInvoice: (invoiceId) => ipcRenderer.invoke("reconcile:run", invoiceId),
-  getLastReconciliation: (invoiceId) => ipcRenderer.invoke("reconcile:last", invoiceId),
+  reconcileStore: () => ipcRenderer.invoke("reconcile:run"),
+  getLastReconciliation: () => ipcRenderer.invoke("reconcile:last"),
+  getReconciliationScope: () => ipcRenderer.invoke("reconcile:scope"),
   parseChevronPdf: (buffer) => {
     const bytes =
       buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;

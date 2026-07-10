@@ -1,7 +1,5 @@
 const InvoiceIngestUI = (() => {
-  let pendingSummary = null;
-  let pendingBatchLines = [];
-  let pendingFilename = "";
+  let pendingItems = [];
   let storeOpen = false;
 
   const dropzone = () => document.getElementById("invoice-dropzone");
@@ -13,6 +11,11 @@ const InvoiceIngestUI = (() => {
     return /\.pdf$/i.test(file.name || "");
   }
 
+  function pdfFilesFromList(fileList) {
+    if (!fileList || !fileList.length) return [];
+    return [...fileList].filter(isPdfFile);
+  }
+
   function setStoreOpen(open) {
     storeOpen = open;
     const dz = dropzone();
@@ -20,13 +23,13 @@ const InvoiceIngestUI = (() => {
     if (open) {
       dz.classList.remove("disabled");
       if (hint) {
-        hint.textContent = "Drop an EFT prenotification PDF here, or click to browse";
+        hint.textContent = "Drop one or more EFT prenotification PDFs here, or click to browse";
       }
     } else {
       dz.classList.add("disabled");
       clearPreview();
       if (hint) {
-        hint.textContent = "Select or create a store first, then drop an EFT PDF here";
+        hint.textContent = "Select or create a store first, then drop EFT PDFs here";
       }
     }
   }
@@ -54,7 +57,7 @@ const InvoiceIngestUI = (() => {
     }
     panel.hidden = false;
     list.innerHTML = warnings
-      .map((w) => `<li>Line ${w.line}: ${w.message}</li>`)
+      .map((w) => `<li>${w.file ? `${w.file}: ` : ""}Line ${w.line}: ${w.message}</li>`)
       .join("");
   }
 
@@ -72,11 +75,13 @@ const InvoiceIngestUI = (() => {
   }
 
   function clearPreview() {
-    pendingSummary = null;
-    pendingBatchLines = [];
-    pendingFilename = "";
+    pendingItems = [];
     document.getElementById("invoice-preview-section").hidden = true;
     document.getElementById("invoice-preview-count").textContent = "0";
+    document.getElementById("invoice-preview-file-count").textContent = "";
+    document.getElementById("invoice-preview-files").hidden = true;
+    document.getElementById("invoice-preview-files").innerHTML = "";
+    document.getElementById("invoice-preview-single-summary").hidden = false;
     document.querySelector("#invoice-preview-table tbody").innerHTML = "";
     document.getElementById("invoice-summary-number").textContent = "—";
     document.getElementById("invoice-summary-total").textContent = "—";
@@ -87,107 +92,227 @@ const InvoiceIngestUI = (() => {
     setConfirmEnabled(true);
   }
 
-  function renderPreview(summary, batchLines) {
-    const period = computePeriod(batchLines);
+  function validItems() {
+    return pendingItems.filter((item) => item.valid);
+  }
 
-    document.getElementById("invoice-summary-number").textContent =
-      summary.invoiceNumber || "—";
-    document.getElementById("invoice-summary-total").textContent = StoreSelector.formatMoney(
-      summary.amount
-    );
-    document.getElementById("invoice-summary-balance").textContent =
-      summary.balance == null ? "—" : StoreSelector.formatMoney(summary.balance);
-    document.getElementById("invoice-summary-period").textContent =
-      period.start && period.end ? `${period.start} – ${period.end}` : "—";
+  function renderPreview() {
+    const items = validItems();
+    const multiple = items.length > 1;
+    const filesEl = document.getElementById("invoice-preview-files");
+    const singleSummary = document.getElementById("invoice-preview-single-summary");
 
-    const tbody = document.querySelector("#invoice-preview-table tbody");
-    tbody.innerHTML = batchLines
-      .map(
-        (line) => `<tr>
+    if (multiple) {
+      singleSummary.hidden = true;
+      filesEl.hidden = false;
+      filesEl.innerHTML = items
+        .map((item) => {
+          const period = computePeriod(item.batchLines);
+          const periodLabel =
+            period.start && period.end ? `${period.start} – ${period.end}` : "—";
+          return `<div class="invoice-summary-card">
+            <p><strong>File:</strong> ${item.filename}</p>
+            <p><strong>Invoice #:</strong> ${item.summary.invoiceNumber}</p>
+            <p><strong>Total:</strong> ${StoreSelector.formatMoney(item.summary.amount)}</p>
+            <p><strong>Balance:</strong> ${
+              item.summary.balance == null
+                ? "—"
+                : StoreSelector.formatMoney(item.summary.balance)
+            }</p>
+            <p><strong>Period:</strong> ${periodLabel}</p>
+            <p><strong>Lines:</strong> ${item.batchLines.length}</p>
+          </div>`;
+        })
+        .join("");
+    } else if (items.length === 1) {
+      filesEl.hidden = true;
+      singleSummary.hidden = false;
+      const item = items[0];
+      const period = computePeriod(item.batchLines);
+      document.getElementById("invoice-summary-number").textContent =
+        item.summary.invoiceNumber || "—";
+      document.getElementById("invoice-summary-total").textContent = StoreSelector.formatMoney(
+        item.summary.amount
+      );
+      document.getElementById("invoice-summary-balance").textContent =
+        item.summary.balance == null ? "—" : StoreSelector.formatMoney(item.summary.balance);
+      document.getElementById("invoice-summary-period").textContent =
+        period.start && period.end ? `${period.start} – ${period.end}` : "—";
+    }
+
+    const thead = document.querySelector("#invoice-preview-table thead tr");
+    thead.innerHTML = multiple
+      ? `<th>Invoice #</th><th>Invoice Line ID</th><th>Batch #</th><th>Date</th><th>Amount</th>`
+      : `<th>Invoice Line ID</th><th>Batch #</th><th>Date</th><th>Amount</th>`;
+
+    const rows = [];
+    for (const item of items) {
+      for (const line of item.batchLines) {
+        const invoiceCell = multiple ? `<td>${item.summary.invoiceNumber}</td>` : "";
+        rows.push(`<tr>
+          ${invoiceCell}
           <td>${line.invoiceId}</td>
           <td>${StoreSelector.stripLeadingZeros(line.batchNumber)}</td>
           <td>${StoreSelector.formatDate(line.invDate)}</td>
           <td class="num">${StoreSelector.formatMoney(line.amount)}</td>
-        </tr>`
-      )
-      .join("");
+        </tr>`);
+      }
+    }
 
-    document.getElementById("invoice-preview-count").textContent = String(batchLines.length);
-    document.getElementById("invoice-preview-section").hidden = false;
+    document.querySelector("#invoice-preview-table tbody").innerHTML = rows.join("");
+
+    const totalLines = items.reduce((sum, item) => sum + item.batchLines.length, 0);
+    document.getElementById("invoice-preview-count").textContent = String(totalLines);
+    document.getElementById("invoice-preview-file-count").textContent =
+      items.length > 1 ? ` from ${items.length} files` : "";
+    document.getElementById("invoice-preview-section").hidden = pendingItems.length === 0;
   }
 
-  async function handlePdfFile(file) {
-    if (!storeOpen) {
-      showStatus("Open a store before uploading a PDF.", "error");
-      return;
+  async function parsePdfFile(file) {
+    const buffer = await file.arrayBuffer();
+    if (!buffer || buffer.byteLength === 0) {
+      return {
+        filename: file.name,
+        summary: null,
+        batchLines: [],
+        warnings: [],
+        valid: false,
+        error: "The selected file is empty.",
+      };
     }
-    if (!isPdfFile(file)) {
-      showStatus("Please select a PDF file.", "error");
+
+    const result = await window.api.parseEftPdf(buffer);
+    const summary = result.summary;
+    const batchLines = result.batchLines || [];
+    const warnings = (result.warnings || []).map((warning) => ({
+      ...warning,
+      file: file.name,
+    }));
+
+    if (!summary || !summary.invoiceNumber) {
+      return {
+        filename: file.name,
+        summary: null,
+        batchLines,
+        warnings,
+        valid: false,
+        error: "No invoice summary found in this PDF.",
+      };
+    }
+
+    if (batchLines.length === 0) {
+      return {
+        filename: file.name,
+        summary,
+        batchLines,
+        warnings,
+        valid: false,
+        error: "No AA batch lines found in this invoice.",
+      };
+    }
+
+    return {
+      filename: file.name,
+      summary,
+      batchLines,
+      warnings,
+      valid: true,
+      error: null,
+    };
+  }
+
+  async function handlePdfFiles(files) {
+    if (!storeOpen) {
+      showStatus("Open a store before uploading PDFs.", "error");
       return;
     }
 
-    showStatus("Parsing EFT invoice…", "info");
+    const pdfFiles = pdfFilesFromList(files);
+    if (pdfFiles.length === 0) {
+      showStatus("Please select one or more PDF files.", "error");
+      return;
+    }
+
+    showStatus(
+      pdfFiles.length === 1 ? "Parsing EFT invoice…" : `Parsing ${pdfFiles.length} EFT invoices…`,
+      "info"
+    );
     clearPreview();
 
-    try {
-      const buffer = await file.arrayBuffer();
-      if (!buffer || buffer.byteLength === 0) {
-        showStatus("The selected file is empty.", "error");
-        return;
+    const parsed = [];
+    const errors = [];
+
+    for (const file of pdfFiles) {
+      try {
+        const item = await parsePdfFile(file);
+        parsed.push(item);
+        if (!item.valid && item.error) {
+          errors.push(`${file.name}: ${item.error}`);
+        }
+      } catch (err) {
+        errors.push(`${file.name}: ${err.message || "Failed to parse PDF."}`);
+        parsed.push({
+          filename: file.name,
+          summary: null,
+          batchLines: [],
+          warnings: [],
+          valid: false,
+          error: err.message || "Failed to parse PDF.",
+        });
       }
-
-      const result = await window.api.parseEftPdf(buffer);
-      pendingSummary = result.summary;
-      pendingBatchLines = result.batchLines || [];
-      pendingFilename = file.name;
-
-      if (!pendingSummary || !pendingSummary.invoiceNumber) {
-        showStatus("No invoice summary found in this PDF.", "error");
-        showWarnings(result.warnings);
-        return;
-      }
-
-      if (pendingBatchLines.length === 0) {
-        showStatus("No AA batch lines found in this invoice.", "error");
-        showWarnings(result.warnings);
-        return;
-      }
-
-      renderPreview(pendingSummary, pendingBatchLines);
-      showWarnings(result.warnings);
-      setConfirmEnabled(true);
-      showStatus(
-        `Parsed invoice ${pendingSummary.invoiceNumber} with ${pendingBatchLines.length} line${pendingBatchLines.length === 1 ? "" : "s"}. Review and confirm.`,
-        "info"
-      );
-    } catch (err) {
-      showStatus(err.message || "Failed to parse PDF.", "error");
     }
+
+    pendingItems = parsed;
+    showWarnings(parsed.flatMap((item) => item.warnings));
+    renderPreview();
+
+    const ready = validItems();
+    if (ready.length === 0) {
+      setConfirmEnabled(false);
+      showStatus(errors.join(" "), "error");
+      return;
+    }
+
+    const totalLines = ready.reduce((sum, item) => sum + item.batchLines.length, 0);
+    setConfirmEnabled(true);
+
+    const invoiceLabels = ready.map((item) => item.summary.invoiceNumber).join(", ");
+    const statusParts = [
+      `Parsed ${ready.length} invoice${ready.length === 1 ? "" : "s"} (${invoiceLabels}) with ${totalLines} line${totalLines === 1 ? "" : "s"}. Review and confirm.`,
+    ];
+    if (errors.length > 0) {
+      statusParts.push(`${errors.length} file${errors.length === 1 ? "" : "s"} skipped: ${errors.join(" ")}`);
+    }
+    showStatus(statusParts.join(" "), "info");
   }
 
-  function fileFromDrop(event) {
-    const dt = event.dataTransfer;
-    if (!dt || !dt.files || !dt.files.length) return null;
-
-    for (const file of dt.files) {
-      if (isPdfFile(file)) return file;
-    }
-    return dt.files[0];
+  function pdfFilesFromDrop(event) {
+    return pdfFilesFromList(event.dataTransfer?.files);
   }
 
   async function confirmIngest(onComplete) {
-    if (!pendingSummary || !pendingBatchLines.length) return;
+    const items = validItems();
+    if (!items.length) return;
+
+    let lastResult = null;
+    let savedCount = 0;
+    let totalLines = 0;
 
     try {
-      const result = await window.api.insertInvoice(
-        pendingSummary,
-        pendingBatchLines,
-        pendingFilename
-      );
-      const reconciliation = result.reconciliation;
+      for (const item of items) {
+        lastResult = await window.api.insertInvoice(
+          item.summary,
+          item.batchLines,
+          item.filename
+        );
+        savedCount += 1;
+        totalLines += lastResult.lineCount;
+      }
+
+      const reconciliation = lastResult?.reconciliation;
       const summary = reconciliation?.summary;
       const statusParts = [
-        `Saved invoice ${pendingSummary.invoiceNumber} (${result.lineCount} line${result.lineCount === 1 ? "" : "s"}).`,
+        `Saved ${savedCount} invoice${savedCount === 1 ? "" : "s"} (${totalLines} line${totalLines === 1 ? "" : "s"}).`,
       ];
       if (summary) {
         statusParts.push(
@@ -196,7 +321,7 @@ const InvoiceIngestUI = (() => {
       }
       showStatus(statusParts.join(" "), "success");
       clearPreview();
-      if (onComplete) await onComplete(result);
+      if (onComplete) await onComplete(lastResult);
     } catch (err) {
       showStatus(err.message || "Failed to save invoice.", "error");
     }
@@ -215,8 +340,8 @@ const InvoiceIngestUI = (() => {
     });
 
     input.addEventListener("change", () => {
-      const file = input.files && input.files[0];
-      if (file) handlePdfFile(file);
+      const files = pdfFilesFromList(input.files);
+      if (files.length) handlePdfFiles(files);
       input.value = "";
     });
 
@@ -248,8 +373,8 @@ const InvoiceIngestUI = (() => {
         showStatus("Select or create a store in the left panel first.", "error");
         return;
       }
-      const file = fileFromDrop(e);
-      if (file) handlePdfFile(file);
+      const files = pdfFilesFromDrop(e);
+      if (files.length) handlePdfFiles(files);
     });
 
     document.getElementById("confirm-invoice-btn").addEventListener("click", () => {

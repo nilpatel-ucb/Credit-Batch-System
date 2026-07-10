@@ -1,6 +1,5 @@
 const BatchIngestUI = (() => {
-  let pendingRecords = [];
-  let pendingFilename = "";
+  let pendingItems = [];
   let storeOpen = false;
 
   const dropzone = () => document.getElementById("dropzone");
@@ -12,6 +11,11 @@ const BatchIngestUI = (() => {
     return /\.pdf$/i.test(file.name || "");
   }
 
+  function pdfFilesFromList(fileList) {
+    if (!fileList || !fileList.length) return [];
+    return [...fileList].filter(isPdfFile);
+  }
+
   function setStoreOpen(open) {
     storeOpen = open;
     const dz = dropzone();
@@ -19,13 +23,13 @@ const BatchIngestUI = (() => {
     if (open) {
       dz.classList.remove("disabled");
       if (hint) {
-        hint.textContent = "Drop a Chevron settlement PDF here, or click to browse";
+        hint.textContent = "Drop one or more Chevron settlement PDFs here, or click to browse";
       }
     } else {
       dz.classList.add("disabled");
       clearPreview();
       if (hint) {
-        hint.textContent = "Select or create a store first, then drop a PDF here";
+        hint.textContent = "Select or create a store first, then drop PDFs here";
       }
     }
   }
@@ -53,7 +57,7 @@ const BatchIngestUI = (() => {
     }
     panel.hidden = false;
     list.innerHTML = warnings
-      .map((w) => `<li>Line ${w.line}: ${w.message}</li>`)
+      .map((w) => `<li>${w.file ? `${w.file}: ` : ""}Line ${w.line}: ${w.message}</li>`)
       .join("");
   }
 
@@ -96,100 +100,178 @@ const BatchIngestUI = (() => {
   }
 
   function clearPreview() {
-    pendingRecords = [];
-    pendingFilename = "";
+    pendingItems = [];
     document.getElementById("preview-section").hidden = true;
     document.getElementById("preview-count").textContent = "0";
+    document.getElementById("preview-file-count").textContent = "";
     document.querySelector("#preview-table tbody").innerHTML = "";
     showWarnings([]);
     hideStatus();
     setConfirmEnabled(true);
   }
 
-  function renderPreview(records) {
-    const tbody = document.querySelector("#preview-table tbody");
-    tbody.innerHTML = records
-      .map(
-        (r) => `<tr>
-          <td>${StoreSelector.formatDate(r.batch_date)}</td>
-          <td>${StoreSelector.stripLeadingZeros(r.batch_number)}</td>
-          <td class="num">${StoreSelector.formatMoney(r.gross_amount)}</td>
-          <td class="num">${StoreSelector.formatMoney(r.total_fee)}</td>
-          <td class="num">${StoreSelector.formatMoney(r.net_amount)}</td>
-          <td>${r.site_id}</td>
-        </tr>`
-      )
-      .join("");
-    document.getElementById("preview-count").textContent = String(records.length);
-    document.getElementById("preview-section").hidden = records.length === 0;
+  function validItems() {
+    return pendingItems.filter((item) => item.valid);
   }
 
-  async function handlePdfFile(file) {
-    if (!storeOpen) {
-      showStatus("Open a store before uploading a PDF.", "error");
-      return;
+  function renderPreview() {
+    const items = validItems();
+    const showSource = pendingItems.length > 1;
+    const thead = document.querySelector("#preview-table thead tr");
+    thead.innerHTML = showSource
+      ? `<th>Source PDF</th><th>Date</th><th>Batch #</th><th>Credit</th><th>Fee</th><th>After Fee Credit</th><th>Site ID</th>`
+      : `<th>Date</th><th>Batch #</th><th>Credit</th><th>Fee</th><th>After Fee Credit</th><th>Site ID</th>`;
+
+    const rows = [];
+    for (const item of items) {
+      for (const record of item.records) {
+        const sourceCell = showSource ? `<td>${item.filename}</td>` : "";
+        rows.push(`<tr>
+          ${sourceCell}
+          <td>${StoreSelector.formatDate(record.batch_date)}</td>
+          <td>${StoreSelector.stripLeadingZeros(record.batch_number)}</td>
+          <td class="num">${StoreSelector.formatMoney(record.gross_amount)}</td>
+          <td class="num">${StoreSelector.formatMoney(record.total_fee)}</td>
+          <td class="num">${StoreSelector.formatMoney(record.net_amount)}</td>
+          <td>${record.site_id}</td>
+        </tr>`);
+      }
     }
-    if (!isPdfFile(file)) {
-      showStatus("Please select a PDF file.", "error");
+
+    const tbody = document.querySelector("#preview-table tbody");
+    tbody.innerHTML = rows.join("");
+
+    const totalBatches = items.reduce((sum, item) => sum + item.records.length, 0);
+    document.getElementById("preview-count").textContent = String(totalBatches);
+    document.getElementById("preview-file-count").textContent =
+      items.length > 1 ? ` from ${items.length} files` : "";
+    document.getElementById("preview-section").hidden = pendingItems.length === 0;
+  }
+
+  async function parsePdfFile(file) {
+    const buffer = await file.arrayBuffer();
+    if (!buffer || buffer.byteLength === 0) {
+      return {
+        filename: file.name,
+        records: [],
+        warnings: [],
+        valid: false,
+        error: "The selected file is empty.",
+      };
+    }
+
+    const result = await window.api.parseChevronPdf(buffer);
+    const records = result.records || [];
+    const warnings = (result.warnings || []).map((warning) => ({
+      ...warning,
+      file: file.name,
+    }));
+
+    if (records.length === 0) {
+      return {
+        filename: file.name,
+        records: [],
+        warnings,
+        valid: false,
+        error: "No batch records found in this PDF.",
+      };
+    }
+
+    const validation = validateRecordsForStore(records);
+    return {
+      filename: file.name,
+      records,
+      warnings,
+      valid: validation.ok,
+      error: validation.ok ? null : validation.message,
+    };
+  }
+
+  async function handlePdfFiles(files) {
+    if (!storeOpen) {
+      showStatus("Open a store before uploading PDFs.", "error");
       return;
     }
 
-    showStatus("Parsing PDF…", "info");
+    const pdfFiles = pdfFilesFromList(files);
+    if (pdfFiles.length === 0) {
+      showStatus("Please select one or more PDF files.", "error");
+      return;
+    }
+
+    showStatus(
+      pdfFiles.length === 1 ? "Parsing PDF…" : `Parsing ${pdfFiles.length} PDFs…`,
+      "info"
+    );
     clearPreview();
 
-    try {
-      const buffer = await file.arrayBuffer();
-      if (!buffer || buffer.byteLength === 0) {
-        showStatus("The selected file is empty.", "error");
-        return;
+    const parsed = [];
+    const errors = [];
+
+    for (const file of pdfFiles) {
+      try {
+        const item = await parsePdfFile(file);
+        parsed.push(item);
+        if (!item.valid && item.error) {
+          errors.push(`${file.name}: ${item.error}`);
+        }
+      } catch (err) {
+        errors.push(`${file.name}: ${err.message || "Failed to parse PDF."}`);
+        parsed.push({
+          filename: file.name,
+          records: [],
+          warnings: [],
+          valid: false,
+          error: err.message || "Failed to parse PDF.",
+        });
       }
-      const result = await window.api.parseChevronPdf(buffer);
-      pendingRecords = result.records || [];
-      pendingFilename = file.name;
-
-      if (pendingRecords.length === 0) {
-        showStatus("No batch records found in this PDF.", "error");
-        showWarnings(result.warnings);
-        return;
-      }
-
-      const validation = validateRecordsForStore(pendingRecords);
-      renderPreview(pendingRecords);
-      showWarnings(result.warnings);
-
-      if (!validation.ok) {
-        setConfirmEnabled(false);
-        showStatus(validation.message, "error");
-        return;
-      }
-
-      setConfirmEnabled(true);
-      showStatus(
-        `Parsed ${pendingRecords.length} batch${pendingRecords.length === 1 ? "" : "es"} from ${file.name}. Site ${StoreSelector.getActiveSiteId()} matches — review and confirm.`,
-        "info"
-      );
-    } catch (err) {
-      showStatus(err.message || "Failed to parse PDF.", "error");
     }
+
+    pendingItems = parsed;
+    const allWarnings = parsed.flatMap((item) => item.warnings);
+    showWarnings(allWarnings);
+    renderPreview();
+
+    const ready = validItems();
+    if (ready.length === 0) {
+      setConfirmEnabled(false);
+      showStatus(errors.join(" "), "error");
+      return;
+    }
+
+    const totalBatches = ready.reduce((sum, item) => sum + item.records.length, 0);
+    setConfirmEnabled(true);
+
+    const statusParts = [
+      `Parsed ${totalBatches} batch${totalBatches === 1 ? "" : "es"} from ${ready.length} file${ready.length === 1 ? "" : "s"}. Site ${StoreSelector.getActiveSiteId()} matches — review and confirm.`,
+    ];
+    if (errors.length > 0) {
+      statusParts.push(`${errors.length} file${errors.length === 1 ? "" : "s"} skipped: ${errors.join(" ")}`);
+    }
+    showStatus(statusParts.join(" "), errors.length > 0 ? "info" : "info");
   }
 
-  function fileFromDrop(event) {
-    const dt = event.dataTransfer;
-    if (!dt || !dt.files || !dt.files.length) return null;
-
-    for (const file of dt.files) {
-      if (isPdfFile(file)) return file;
-    }
-    return dt.files[0];
+  function pdfFilesFromDrop(event) {
+    return pdfFilesFromList(event.dataTransfer?.files);
   }
 
   async function confirmIngest(onComplete) {
-    if (!pendingRecords.length) return;
+    const items = validItems();
+    if (!items.length) return;
+
+    let totalAdded = 0;
+    let totalSkipped = 0;
+    const errors = [];
 
     try {
-      const result = await window.api.insertBatches(pendingRecords, pendingFilename);
+      for (const item of items) {
+        const result = await window.api.insertBatches(item.records, item.filename);
+        totalAdded += result.added;
+        totalSkipped += result.skipped;
+      }
+
       showStatus(
-        `Added ${result.added} batch${result.added === 1 ? "" : "es"}, ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"} skipped.`,
+        `Added ${totalAdded} batch${totalAdded === 1 ? "" : "es"} from ${items.length} file${items.length === 1 ? "" : "s"}, ${totalSkipped} duplicate${totalSkipped === 1 ? "" : "s"} skipped.`,
         "success"
       );
       clearPreview();
@@ -203,7 +285,6 @@ const BatchIngestUI = (() => {
     const dz = dropzone();
     const input = pdfInput();
 
-    // Required in Electron — without this, Finder drops are ignored
     document.addEventListener("dragover", (e) => {
       e.preventDefault();
     });
@@ -220,8 +301,8 @@ const BatchIngestUI = (() => {
     });
 
     input.addEventListener("change", () => {
-      const file = input.files && input.files[0];
-      if (file) handlePdfFile(file);
+      const files = pdfFilesFromList(input.files);
+      if (files.length) handlePdfFiles(files);
       input.value = "";
     });
 
@@ -253,8 +334,8 @@ const BatchIngestUI = (() => {
         showStatus("Select or create a store in the left panel first.", "error");
         return;
       }
-      const file = fileFromDrop(e);
-      if (file) handlePdfFile(file);
+      const files = pdfFilesFromDrop(e);
+      if (files.length) handlePdfFiles(files);
     });
 
     document.getElementById("confirm-ingest-btn").addEventListener("click", () => {

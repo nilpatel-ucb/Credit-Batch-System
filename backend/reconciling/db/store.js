@@ -3,8 +3,7 @@ const path = require("path");
 const Database = require("better-sqlite3");
 const { migrate } = require("./migrations");
 const Normalize = require("../../parsing/normalize");
-const { runReconciliation } = require("../reconcile-service");
-const { expandReconcilePeriod } = require("../reconcile");
+const { runStoreReconciliation } = require("../reconcile-service");
 
 function sanitizeStoreName(name) {
   const trimmed = String(name || "").trim();
@@ -539,7 +538,7 @@ function createStoreManager(storesDir) {
 
     run();
 
-    const reconciliation = reconcileInvoice(invoiceId);
+    const reconciliation = reconcileStore();
 
     return {
       invoiceId,
@@ -650,44 +649,48 @@ function createStoreManager(storesDir) {
       .all(periodStart, periodEnd);
   }
 
-  function reconcileInvoice(invoiceId) {
+  function getAllInvoiceLines() {
+    return requireDb()
+      .prepare(
+        `SELECT l.id, l.invoice_id, l.invoice_line_id, l.batch_number, l.amount, l.inv_date,
+                l.match_status, l.batch_id, i.invoice_number
+         FROM invoice_lines l
+         JOIN invoices i ON i.id = l.invoice_id
+         ORDER BY l.inv_date, l.invoice_line_id`
+      )
+      .all();
+  }
+
+  function reconcileStore() {
     const database = requireDb();
-    return runReconciliation(database, invoiceId, {
-      getInvoiceForReconcile,
-      getInvoiceLines,
-      getBatchesInPeriod,
+    return runStoreReconciliation(database, {
       getBatches,
+      getAllInvoiceLines,
+      getInvoices,
     });
   }
 
-  function getLastReconciliationRun(invoiceId) {
-    const database = requireDb();
-    const run = database
-      .prepare(
-        `SELECT id, invoice_id, run_at, scoped_batch_count, matched_count,
-                missing_from_invoice_count, unmatched_line_count, mismatch_count,
-                total_deposit, total_fee, total_credit, credit_discrepancy
-         FROM reconciliation_runs
-         WHERE invoice_id = ?
-         ORDER BY run_at DESC, id DESC
-         LIMIT 1`
-      )
-      .get(invoiceId);
+  function getStoreReconciliation() {
+    const batches = getBatches();
+    const lines = getAllInvoiceLines();
+    const invoices = getInvoices();
 
-    if (!run) {
+    if (batches.length === 0 && lines.length === 0) {
       return null;
     }
 
-    const invoice = getInvoiceForReconcile(invoiceId);
-    if (!invoice) {
+    const hasReconciled = batches.some((batch) => batch.last_reconciled_at);
+    if (!hasReconciled) {
       return null;
     }
 
-    const lines = getInvoiceLines(invoiceId);
-    const { scopeStart, scopeEnd } = expandReconcilePeriod(invoice.period_start, invoice.period_end);
-    const scopedBatches = getBatchesInPeriod(scopeStart, scopeEnd);
-    const allBatches = getBatches();
-    const batchById = new Map(allBatches.map((batch) => [batch.id, batch]));
+    const batchById = new Map(batches.map((batch) => [batch.id, batch]));
+    const invoiceTotal = invoices.reduce((sum, invoice) => sum + Number(invoice.invoice_total), 0);
+    const runAt = batches.reduce((latest, batch) => {
+      if (!batch.last_reconciled_at) return latest;
+      if (!latest || batch.last_reconciled_at > latest) return batch.last_reconciled_at;
+      return latest;
+    }, null);
 
     const matched = lines
       .filter((line) => line.match_status === "matched" && line.batch_id)
@@ -702,16 +705,22 @@ function createStoreManager(storesDir) {
           totalFee: batch.total_fee,
           netAmount: batch.net_amount,
           invoiceLineId: line.invoice_line_id,
+          invoiceNumber: line.invoice_number,
           invoiceAmount: Math.abs(Number(line.amount)),
           invDate: line.inv_date,
         };
       })
       .filter(Boolean);
 
-    const missingBatches = scopedBatches.filter(
-      (batch) => batch.match_status === "missing_from_invoice"
-    );
+    const missingBatches = batches.filter((batch) => batch.match_status === "missing_from_invoice");
     const totalMissingCredit = missingBatches.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
+    const matchedCount = matched.length;
+    const totalDeposit = matched.reduce((sum, row) => sum + Number(row.grossAmount), 0);
+    const totalFee = matched.reduce((sum, row) => sum + Number(row.totalFee), 0);
+    const totalCredit = matched.reduce((sum, row) => sum + Number(row.netAmount), 0);
+    const unmatchedLineCount = lines.filter((line) => line.match_status === "unmatched").length;
+    const ambiguousLineCount = lines.filter((line) => line.match_status === "ambiguous").length;
+    const mismatchCount = lines.filter((line) => line.match_status === "mismatch").length;
 
     const exceptions = [];
     for (const batch of missingBatches) {
@@ -723,7 +732,7 @@ function createStoreManager(storesDir) {
         netAmount: batch.net_amount,
         invoiceLineId: null,
         invoiceAmount: null,
-        message: "Batch is in the invoice period but has no matching invoice line.",
+        message: "Batch has no matching invoice line.",
       });
     }
 
@@ -768,29 +777,37 @@ function createStoreManager(storesDir) {
     }
 
     return {
-      runId: run.id,
-      runAt: run.run_at,
-      invoiceId: invoice.id,
-      invoiceNumber: invoice.invoice_number,
-      periodStart: invoice.period_start,
-      periodEnd: invoice.period_end,
+      runAt,
+      invoiceCount: invoices.length,
       summary: {
-        scopedBatchCount: run.scoped_batch_count,
+        scopedBatchCount: batches.length,
         lineCount: lines.length,
-        matchedCount: run.matched_count,
-        missingFromInvoiceCount: run.missing_from_invoice_count,
-        unmatchedLineCount: run.unmatched_line_count,
-        ambiguousLineCount: lines.filter((line) => line.match_status === "ambiguous").length,
-        mismatchCount: run.mismatch_count,
-        totalDeposit: run.total_deposit,
-        totalFee: run.total_fee,
-        totalCredit: run.total_credit,
-        invoiceTotal: invoice.invoice_total,
-        creditDiscrepancy: run.credit_discrepancy,
+        matchedCount,
+        missingFromInvoiceCount: missingBatches.length,
+        unmatchedLineCount,
+        ambiguousLineCount,
+        mismatchCount,
+        totalDeposit: Math.round(totalDeposit * 100) / 100,
+        totalFee: Math.round(totalFee * 100) / 100,
+        totalCredit: Math.round(totalCredit * 100) / 100,
+        invoiceTotal: Math.round(invoiceTotal * 100) / 100,
+        creditDiscrepancy: Math.round((invoiceTotal - totalCredit) * 100) / 100,
         totalMissingCredit: Math.round(totalMissingCredit * 100) / 100,
       },
       matched,
       exceptions,
+    };
+  }
+
+  function getReconciliationScope() {
+    const batches = getBatches();
+    const lines = getAllInvoiceLines();
+    const invoices = getInvoices();
+
+    return {
+      batches,
+      lines,
+      invoiceCount: invoices.length,
     };
   }
 
@@ -809,11 +826,13 @@ function createStoreManager(storesDir) {
     insertInvoice,
     getInvoices,
     getInvoiceLines,
+    getAllInvoiceLines,
     deleteInvoice,
     getInvoiceForReconcile,
     getBatchesInPeriod,
-    reconcileInvoice,
-    getLastReconciliationRun,
+    getReconciliationScope,
+    reconcileStore,
+    getStoreReconciliation,
     getCurrentStoreName: () => currentStoreName,
     normalizeSiteId,
   };

@@ -45,47 +45,16 @@ const App = (() => {
     };
   }
 
-  function formatMatchStatus(status) {
-    switch (status) {
-      case "matched":
-        return "Matched";
-      case "missing_from_invoice":
-        return "Missing from invoice";
-      case "mismatch":
-        return "Amount mismatch";
-      case "ambiguous":
-        return "Ambiguous";
-      case "unmatched":
-      default:
-        return "Unmatched";
-    }
-  }
-
-  function rowStatusClass(status) {
-    switch (status) {
-      case "matched":
-        return "row-status-matched";
-      case "missing_from_invoice":
-      case "mismatch":
-      case "unmatched":
-      case "ambiguous":
-        return "row-status-flagged";
-      default:
-        return "";
-    }
-  }
-
   function renderBatchLineRows(batches) {
     return batches
       .map(
-        (b) => `<tr class="${rowStatusClass(b.match_status)}" data-batch-id="${b.id}">
+        (b) => `<tr data-batch-id="${b.id}">
           <td>${StoreSelector.formatDate(b.batch_date)}</td>
           <td>${StoreSelector.stripLeadingZeros(b.batch_number)}</td>
           <td class="num">${StoreSelector.formatMoney(b.gross_amount)}</td>
           <td class="num">${StoreSelector.formatMoney(b.total_fee)}</td>
           <td class="num">${StoreSelector.formatMoney(b.net_amount)}</td>
           <td>${b.site_id}</td>
-          <td>${formatMatchStatus(b.match_status)}</td>
           <td><button type="button" class="danger batch-delete-btn" data-batch-id="${b.id}" data-batch-number="${b.batch_number}" data-batch-date="${b.batch_date}">Delete</button></td>
         </tr>`
       )
@@ -96,7 +65,6 @@ const App = (() => {
     selectedInvoiceId = null;
     document.getElementById("invoice-lines-panel").hidden = true;
     document.getElementById("invoice-lines-delete-btn").hidden = true;
-    ReconcileUI.hide();
     document.querySelectorAll("#invoices-table tbody tr.selected").forEach((row) => {
       row.classList.remove("selected");
     });
@@ -120,23 +88,21 @@ const App = (() => {
     const tbody = document.querySelector("#invoice-lines-table tbody");
     if (lines.length === 0) {
       tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="5">No lines found for this invoice</td></tr>';
+        '<tr class="empty-row"><td colspan="4">No lines found for this invoice</td></tr>';
     } else {
       tbody.innerHTML = lines
         .map(
-          (line) => `<tr class="${rowStatusClass(line.match_status)}">
+          (line) => `<tr>
           <td>${line.invoice_line_id}</td>
           <td>${StoreSelector.stripLeadingZeros(line.batch_number)}</td>
           <td>${StoreSelector.formatDate(line.inv_date)}</td>
           <td class="num">${StoreSelector.formatMoney(line.amount)}</td>
-          <td>${formatMatchStatus(line.match_status)}</td>
         </tr>`
         )
         .join("");
     }
 
     document.getElementById("invoice-lines-panel").hidden = false;
-    await ReconcileUI.loadForInvoice(invoiceId, invoiceNumber);
   }
 
   function showBatchLines(groupIndex) {
@@ -150,7 +116,7 @@ const App = (() => {
 
     if (!group || group.batches.length === 0) {
       tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="8">No batches found for this upload</td></tr>';
+        '<tr class="empty-row"><td colspan="7">No batches found for this upload</td></tr>';
     } else {
       const sorted = [...group.batches].sort((a, b) => {
         const dateCmp = String(a.batch_date).localeCompare(String(b.batch_date));
@@ -250,6 +216,7 @@ const App = (() => {
       tbody.innerHTML =
         '<tr class="empty-row"><td colspan="8">Open a store to view invoices</td></tr>';
       document.getElementById("invoice-count-badge").textContent = "0";
+      ReconcileUI.resetView();
       clearInvoiceLinesPanel();
       return;
     }
@@ -280,7 +247,6 @@ const App = (() => {
           <td>${invoice.pdf_filename || ""}</td>
           <td>${StoreSelector.formatDateTime(invoice.processed_at)}</td>
           <td class="invoice-actions-cell">
-            <button type="button" class="primary invoice-reconcile-btn" data-invoice-id="${invoice.id}" data-invoice-number="${invoice.invoice_number}">Reconcile</button>
             <button type="button" class="danger invoice-delete-btn" data-invoice-id="${invoice.id}" data-invoice-number="${invoice.invoice_number}" data-pdf-filename="${invoice.pdf_filename || ""}">Delete</button>
           </td>
         </tr>`
@@ -300,10 +266,14 @@ const App = (() => {
   async function onStoreChange() {
     clearInvoiceLinesPanel();
     clearBatchLinesPanel();
+    ReconcileUI.resetView();
     const active = !!StoreSelector.getActiveStore();
     BatchIngestUI.setStoreOpen(active);
     InvoiceIngestUI.setStoreOpen(active);
     await Promise.all([renderBatches(), renderInvoices()]);
+    if (active) {
+      await ReconcileUI.onStoreOpen();
+    }
   }
 
   async function onBatchIngestComplete() {
@@ -330,12 +300,15 @@ const App = (() => {
       }
       if (result.reconciliation) {
         ReconcileUI.render(result.reconciliation);
+        document.getElementById("reconciliation-section").scrollIntoView({ behavior: "smooth" });
       }
+      await ReconcileUI.refresh();
     }
   }
 
   async function onReconcileComplete() {
     await Promise.all([renderBatches(), renderInvoices()]);
+    await ReconcileUI.refresh();
     if (selectedInvoiceId != null) {
       const row = document.querySelector(
         `#invoices-table tr[data-invoice-id="${selectedInvoiceId}"]`
@@ -366,11 +339,6 @@ const App = (() => {
       highlightSelectedInvoiceRow();
     });
 
-    document.getElementById("invoice-lines-reconcile-btn").addEventListener("click", async () => {
-      if (selectedInvoiceId == null) return;
-      await ReconcileUI.runReconciliation(selectedInvoiceId);
-    });
-
     document.getElementById("invoice-lines-delete-btn").addEventListener("click", async () => {
       if (selectedInvoiceId == null) return;
       const row = document.querySelector(
@@ -392,18 +360,6 @@ const App = (() => {
           deleteBtn.dataset.invoiceNumber,
           deleteBtn.dataset.pdfFilename
         );
-        return;
-      }
-
-      const reconcileBtn = event.target.closest(".invoice-reconcile-btn");
-      if (reconcileBtn) {
-        event.stopPropagation();
-        const invoiceId = Number(reconcileBtn.dataset.invoiceId);
-        const invoiceNumber = reconcileBtn.dataset.invoiceNumber;
-        selectedInvoiceId = invoiceId;
-        await showInvoiceLines(invoiceId, invoiceNumber);
-        highlightSelectedInvoiceRow();
-        await ReconcileUI.runReconciliation(invoiceId);
         return;
       }
 
@@ -472,6 +428,7 @@ const App = (() => {
         : null;
       const result = await window.api.deleteBatch(batchId);
       await refreshAfterBatchDeletion(result.batchCount, { preserveGroup });
+      await ReconcileUI.refresh();
     } catch (err) {
       window.alert(err.message || "Failed to delete batch.");
     }
@@ -490,6 +447,7 @@ const App = (() => {
     try {
       const result = await window.api.deleteBatchSource(group.source_pdf, group.ingested_at);
       await refreshAfterBatchDeletion(result.batchCount);
+      await ReconcileUI.refresh();
     } catch (err) {
       window.alert(err.message || "Failed to delete upload.");
     }

@@ -1,44 +1,34 @@
 const ReconcileUI = (() => {
-  let activeInvoiceId = null;
-  let currentResult = null;
+  let storeOpen = false;
   let onReconcileComplete = null;
 
-  function section() {
-    return document.getElementById("reconcile-section");
-  }
-
-  function formatPeriod(start, end) {
-    if (!start || !end) return "—";
-    return `${StoreSelector.formatDate(start)} – ${StoreSelector.formatDate(end)}`;
-  }
-
-  function formatExceptionType(type) {
-    switch (type) {
+  function formatMatchStatus(status) {
+    switch (status) {
+      case "matched":
+        return "Matched";
       case "missing_from_invoice":
         return "Missing from invoice";
-      case "unmatched_line":
-        return "Unmatched line";
-      case "ambiguous":
-        return "Ambiguous";
       case "mismatch":
         return "Amount mismatch";
+      case "ambiguous":
+        return "Ambiguous";
+      case "unmatched":
       default:
-        return type;
+        return "Unmatched";
     }
   }
 
-  function exceptionTypeClass(type) {
-    switch (type) {
+  function rowStatusClass(status) {
+    switch (status) {
+      case "matched":
+        return "row-reconcile-matched";
       case "missing_from_invoice":
-        return "flag-missing";
-      case "unmatched_line":
-        return "flag-unmatched";
       case "mismatch":
-        return "flag-mismatch";
+      case "unmatched":
       case "ambiguous":
-        return "flag-ambiguous";
+        return "row-reconcile-missing";
       default:
-        return "flag-default";
+        return "";
     }
   }
 
@@ -54,168 +44,176 @@ const ReconcileUI = (() => {
     el.textContent = message;
   }
 
-  function renderSummary(summary, invoiceNumber) {
+  function setControlsEnabled(enabled) {
+    storeOpen = enabled;
+    document.getElementById("reconcile-run-btn").disabled = !enabled;
+  }
+
+  function renderSummary(summary) {
     const missingEl = document.getElementById("reconcile-missing-credit");
-    const missingValue = Number(summary.totalMissingCredit || 0);
-    missingEl.textContent = StoreSelector.formatMoney(missingValue);
+    const missingValue = Number(summary?.totalMissingCredit || 0);
+    missingEl.textContent =
+      summary != null ? StoreSelector.formatMoney(missingValue) : "—";
     missingEl.classList.toggle("highlight-warning", missingValue > 0);
 
-    document.getElementById("reconcile-invoice-number").textContent = invoiceNumber || "—";
-    document.getElementById("reconcile-total-deposit").textContent = StoreSelector.formatMoney(
-      summary.totalDeposit
-    );
-    document.getElementById("reconcile-total-fee").textContent = StoreSelector.formatMoney(
-      summary.totalFee
-    );
-    document.getElementById("reconcile-total-credit").textContent = StoreSelector.formatMoney(
-      summary.totalCredit
-    );
-    document.getElementById("reconcile-invoice-amount").textContent = StoreSelector.formatMoney(
-      summary.invoiceTotal
-    );
-    document.getElementById("reconcile-credit-gap").textContent = StoreSelector.formatMoney(
-      summary.creditDiscrepancy
-    );
+    document.getElementById("reconcile-total-deposit").textContent =
+      summary != null ? StoreSelector.formatMoney(summary.totalDeposit) : "—";
+    document.getElementById("reconcile-total-fee").textContent =
+      summary != null ? StoreSelector.formatMoney(summary.totalFee) : "—";
+    document.getElementById("reconcile-total-credit").textContent =
+      summary != null ? StoreSelector.formatMoney(summary.totalCredit) : "—";
+    document.getElementById("reconcile-invoice-amount").textContent =
+      summary != null ? StoreSelector.formatMoney(summary.invoiceTotal) : "—";
+    document.getElementById("reconcile-credit-gap").textContent =
+      summary != null ? StoreSelector.formatMoney(summary.creditDiscrepancy) : "—";
   }
 
   function renderCoverage(result) {
+    if (!result) {
+      document.getElementById("reconcile-coverage").textContent = "";
+      document.getElementById("reconcile-coverage-warning").hidden = true;
+      return;
+    }
+
     const summary = result.summary;
-    const text = `Invoice period ${formatPeriod(result.periodStart, result.periodEnd)}: ${summary.scopedBatchCount} batches in database, ${summary.lineCount} lines on invoice, ${summary.missingFromInvoiceCount} missing from invoice, ${summary.unmatchedLineCount} unmatched lines.`;
+    const invoiceLabel =
+      result.invoiceCount === 1 ? "1 invoice" : `${result.invoiceCount} invoices`;
+    const text = `Store ledger: ${summary.scopedBatchCount} batches, ${summary.lineCount} invoice lines across ${invoiceLabel}, ${summary.missingFromInvoiceCount} batches missing from invoices, ${summary.unmatchedLineCount} unmatched lines.`;
     document.getElementById("reconcile-coverage").textContent = text;
 
     const warningEl = document.getElementById("reconcile-coverage-warning");
     const showWarning =
-      summary.scopedBatchCount < summary.lineCount ||
-      summary.missingFromInvoiceCount > 0 ||
-      summary.unmatchedLineCount > 0;
+      summary.missingFromInvoiceCount > 0 || summary.unmatchedLineCount > 0;
     warningEl.hidden = !showWarning;
   }
 
-  function renderExceptions(exceptions) {
-    const tbody = document.querySelector("#reconcile-exceptions-table tbody");
-    if (!exceptions || exceptions.length === 0) {
+  function renderBatchesTable(batches) {
+    const tbody = document.querySelector("#reconcile-batches-table tbody");
+    document.getElementById("reconcile-batch-count").textContent = String(batches.length);
+
+    if (!batches || batches.length === 0) {
       tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="6">No exceptions — all scoped batches and invoice lines reconciled cleanly.</td></tr>';
+        '<tr class="empty-row"><td colspan="4">No batches in this store yet</td></tr>';
       return;
     }
 
-    tbody.innerHTML = exceptions
-      .map((item) => {
-        const amount =
-          item.netAmount != null
-            ? StoreSelector.formatMoney(item.netAmount)
-            : item.invoiceAmount != null
-              ? StoreSelector.formatMoney(item.invoiceAmount)
-              : "";
-        return `<tr>
-          <td><span class="flag-badge ${exceptionTypeClass(item.type)}">${formatExceptionType(item.type)}</span></td>
-          <td>${item.batchNumber ? StoreSelector.stripLeadingZeros(item.batchNumber) : ""}</td>
-          <td>${item.batchDate ? StoreSelector.formatDate(item.batchDate) : ""}</td>
-          <td class="num">${amount}</td>
-          <td>${item.invoiceLineId || ""}</td>
-          <td>${item.message || ""}</td>
-        </tr>`;
-      })
-      .join("");
-  }
-
-  function renderMatched(matched) {
-    const tbody = document.querySelector("#reconcile-matched-table tbody");
-    if (!matched || matched.length === 0) {
-      tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="6">No matched batches for this reconciliation run.</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = matched
+    tbody.innerHTML = batches
       .map(
-        (row) => `<tr>
-          <td>${StoreSelector.formatDate(row.batchDate)}</td>
-          <td>${StoreSelector.stripLeadingZeros(row.batchNumber)}</td>
-          <td class="num">${StoreSelector.formatMoney(row.netAmount)}</td>
-          <td>${row.invoiceLineId}</td>
-          <td>${StoreSelector.formatDate(row.invDate)}</td>
-          <td class="num">${StoreSelector.formatMoney(row.invoiceAmount)}</td>
+        (batch) => `<tr class="${rowStatusClass(batch.match_status)}">
+          <td>${StoreSelector.formatDate(batch.batch_date)}</td>
+          <td>${StoreSelector.stripLeadingZeros(batch.batch_number)}</td>
+          <td class="num">${StoreSelector.formatMoney(batch.net_amount)}</td>
+          <td>${formatMatchStatus(batch.match_status)}</td>
         </tr>`
       )
       .join("");
   }
 
-  function render(result) {
-    if (!result) {
-      hide();
+  function renderLinesTable(lines) {
+    const tbody = document.querySelector("#reconcile-lines-table tbody");
+    document.getElementById("reconcile-line-count").textContent = String(lines.length);
+
+    if (!lines || lines.length === 0) {
+      tbody.innerHTML =
+        '<tr class="empty-row"><td colspan="6">No invoice lines in this store yet</td></tr>';
       return;
     }
 
-    currentResult = result;
-    section().hidden = false;
-    renderSummary(result.summary, result.invoiceNumber);
-    renderCoverage(result);
-    renderExceptions(result.exceptions);
-    renderMatched(result.matched);
-
-    const runAt = result.runAt ? StoreSelector.formatDateTime(result.runAt) : "";
-    setStatus(runAt ? `Last reconciled ${runAt}.` : "", "info");
+    tbody.innerHTML = lines
+      .map(
+        (line) => `<tr class="${rowStatusClass(line.match_status)}">
+          <td>${line.invoice_number || ""}</td>
+          <td>${line.invoice_line_id}</td>
+          <td>${StoreSelector.stripLeadingZeros(line.batch_number)}</td>
+          <td>${StoreSelector.formatDate(line.inv_date)}</td>
+          <td class="num">${StoreSelector.formatMoney(line.amount)}</td>
+          <td>${formatMatchStatus(line.match_status)}</td>
+        </tr>`
+      )
+      .join("");
   }
 
-  function hide() {
-    activeInvoiceId = null;
-    currentResult = null;
-    section().hidden = true;
+  function renderScope(scope) {
+    if (!scope) {
+      renderBatchesTable([]);
+      renderLinesTable([]);
+      return;
+    }
+
+    renderBatchesTable(scope.batches);
+    renderLinesTable(scope.lines);
+  }
+
+  function render(result) {
+    if (!result) {
+      renderSummary(null);
+      renderCoverage(null);
+      return;
+    }
+
+    renderSummary(result.summary);
+    renderCoverage(result);
+  }
+
+  function resetView() {
+    setControlsEnabled(false);
+    renderSummary(null);
+    renderCoverage(null);
+    renderBatchesTable([]);
+    renderLinesTable([]);
     setStatus("");
   }
 
-  async function loadForInvoice(invoiceId, invoiceNumber) {
-    if (!invoiceId) {
-      hide();
+  async function loadScope() {
+    if (!storeOpen) {
+      renderScope(null);
+      renderSummary(null);
+      renderCoverage(null);
       return null;
     }
 
-    activeInvoiceId = invoiceId;
-    document.getElementById("reconcile-invoice-number").textContent = invoiceNumber || "—";
-    const result = await window.api.getLastReconciliation(invoiceId);
-    if (result) {
-      render(result);
-    } else {
-      section().hidden = false;
+    const scope = await window.api.getReconciliationScope();
+    renderScope(scope);
+
+    const lastResult = await window.api.getLastReconciliation();
+    if (lastResult) {
+      render(lastResult);
+      const runAt = lastResult.runAt ? StoreSelector.formatDateTime(lastResult.runAt) : "";
+      setStatus(runAt ? `Last reconciled ${runAt}.` : "", "info");
+    } else if (scope && (scope.batches.length > 0 || scope.lines.length > 0)) {
+      renderSummary(null);
+      renderCoverage(null);
       setStatus(
-        "This invoice has not been reconciled yet. Click Reconcile to match batches and find missing credit.",
+        "This store has not been reconciled yet. Click Reconcile store to match all batches and invoice lines.",
         "info"
       );
-      document.getElementById("reconcile-total-deposit").textContent = "—";
-      document.getElementById("reconcile-total-fee").textContent = "—";
-      document.getElementById("reconcile-total-credit").textContent = "—";
-      document.getElementById("reconcile-invoice-amount").textContent = "—";
-      document.getElementById("reconcile-credit-gap").textContent = "—";
-      document.getElementById("reconcile-missing-credit").textContent = "—";
-      document.getElementById("reconcile-coverage").textContent = "";
-      document.getElementById("reconcile-coverage-warning").hidden = true;
-      document.querySelector("#reconcile-exceptions-table tbody").innerHTML =
-        '<tr class="empty-row"><td colspan="6">Run reconciliation to see missing batches and exceptions.</td></tr>';
-      document.querySelector("#reconcile-matched-table tbody").innerHTML =
-        '<tr class="empty-row"><td colspan="6">No reconciliation results yet.</td></tr>';
+    } else {
+      renderSummary(null);
+      renderCoverage(null);
+      setStatus("");
     }
-    return result;
+
+    return scope;
   }
 
-  async function runReconciliation(invoiceId) {
-    if (!invoiceId) {
-      setStatus("Select an invoice to reconcile.", "error");
+  async function runReconciliation() {
+    if (!storeOpen) {
+      setStatus("Open a store to reconcile.", "error");
       return null;
     }
 
     const button = document.getElementById("reconcile-run-btn");
     button.disabled = true;
-    setStatus("Reconciling…", "info");
+    setStatus("Reconciling store…", "info");
 
     try {
-      const result = await window.api.reconcileInvoice(invoiceId);
-      activeInvoiceId = invoiceId;
+      const result = await window.api.reconcileStore();
       render(result);
+      await loadScope();
 
       const summary = result.summary;
       setStatus(
-        `Reconciled invoice ${result.invoiceNumber}: ${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} missing from invoice, ${StoreSelector.formatMoney(summary.totalMissingCredit)} missing credit.`,
+        `Reconciled store: ${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} batches missing from invoices, ${summary.unmatchedLineCount} unmatched lines, ${StoreSelector.formatMoney(summary.totalMissingCredit)} missing credit.`,
         summary.missingFromInvoiceCount > 0 || summary.unmatchedLineCount > 0 ? "info" : "success"
       );
 
@@ -227,31 +225,37 @@ const ReconcileUI = (() => {
       setStatus(err.message || "Reconciliation failed.", "error");
       return null;
     } finally {
-      button.disabled = false;
+      button.disabled = !storeOpen;
     }
+  }
+
+  async function onStoreOpen() {
+    setControlsEnabled(true);
+    await loadScope();
   }
 
   function init(handlers) {
     onReconcileComplete = handlers.onReconcileComplete;
 
     document.getElementById("reconcile-run-btn").addEventListener("click", async () => {
-      if (activeInvoiceId != null) {
-        await runReconciliation(activeInvoiceId);
-      }
+      await runReconciliation();
     });
 
-    document.getElementById("collapse-reconcile-btn").addEventListener("click", () => {
-      hide();
-    });
+    resetView();
+  }
 
-    hide();
+  async function refresh() {
+    if (storeOpen) {
+      await loadScope();
+    }
   }
 
   return {
     init,
-    hide,
-    render,
-    loadForInvoice,
+    resetView,
+    onStoreOpen,
     runReconciliation,
+    render,
+    refresh,
   };
 })();

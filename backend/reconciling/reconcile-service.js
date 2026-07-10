@@ -1,4 +1,4 @@
-const { reconcile, expandReconcilePeriod } = require("./reconcile");
+const { reconcile } = require("./reconcile");
 
 function round2(value) {
   return Math.round(Number(value) * 100) / 100;
@@ -71,33 +71,29 @@ function buildMatchedRows(result) {
     totalFee: batch.total_fee,
     netAmount: batch.net_amount,
     invoiceLineId: line.invoice_line_id,
+    invoiceNumber: line.invoice_number || null,
     invoiceAmount,
     invDate: line.inv_date,
   }));
 }
 
-function formatReconciliationResult(invoice, result, runAt, runId = null) {
+function formatStoreReconciliationResult(result, runAt, invoiceCount) {
   return {
-    runId,
     runAt,
-    invoiceId: invoice.id,
-    invoiceNumber: invoice.invoice_number,
-    periodStart: invoice.period_start,
-    periodEnd: invoice.period_end,
+    invoiceCount,
     summary: result.summary,
     matched: buildMatchedRows(result),
     exceptions: buildExceptions(result),
   };
 }
 
-function resetReconciliationState(database, invoiceId, periodStart, periodEnd) {
+function resetStoreReconciliationState(database) {
   database
     .prepare(
       `UPDATE invoice_lines
-       SET match_status = 'unmatched', batch_id = NULL
-       WHERE invoice_id = ?`
+       SET match_status = 'unmatched', batch_id = NULL`
     )
-    .run(invoiceId);
+    .run();
 
   database
     .prepare(
@@ -105,13 +101,12 @@ function resetReconciliationState(database, invoiceId, periodStart, periodEnd) {
        SET match_status = 'unmatched',
            invoice_line_id = NULL,
            invoice_amount = NULL,
-           last_reconciled_at = NULL
-       WHERE batch_date >= ? AND batch_date <= ?`
+           last_reconciled_at = NULL`
     )
-    .run(periodStart, periodEnd);
+    .run();
 }
 
-function applyReconciliation(database, invoiceId, result, runAt) {
+function applyReconciliation(database, result, runAt) {
   const updateBatch = database.prepare(
     `UPDATE batches
      SET match_status = @match_status,
@@ -127,20 +122,6 @@ function applyReconciliation(database, invoiceId, result, runAt) {
          batch_id = @batch_id
      WHERE id = @id`
   );
-
-  const insertRun = database.prepare(
-    `INSERT INTO reconciliation_runs (
-       invoice_id, run_at, scoped_batch_count, matched_count,
-       missing_from_invoice_count, unmatched_line_count, mismatch_count,
-       total_deposit, total_fee, total_credit, credit_discrepancy
-     ) VALUES (
-       @invoice_id, @run_at, @scoped_batch_count, @matched_count,
-       @missing_from_invoice_count, @unmatched_line_count, @mismatch_count,
-       @total_deposit, @total_fee, @total_credit, @credit_discrepancy
-     )`
-  );
-
-  let runId = null;
 
   const run = database.transaction(() => {
     for (const { line, batch, invoiceAmount } of result.matchedPairs) {
@@ -198,60 +179,35 @@ function applyReconciliation(database, invoiceId, result, runAt) {
         batch_id: batch.id,
       });
     }
-
-    const summary = result.summary;
-    const insertResult = insertRun.run({
-      invoice_id: invoiceId,
-      run_at: runAt,
-      scoped_batch_count: summary.scopedBatchCount,
-      matched_count: summary.matchedCount,
-      missing_from_invoice_count: summary.missingFromInvoiceCount,
-      unmatched_line_count: summary.unmatchedLineCount + summary.ambiguousLineCount,
-      mismatch_count: summary.mismatchCount,
-      total_deposit: summary.totalDeposit,
-      total_fee: summary.totalFee,
-      total_credit: summary.totalCredit,
-      credit_discrepancy: summary.creditDiscrepancy,
-    });
-    runId = insertResult.lastInsertRowid;
   });
 
   run();
-  return runId;
 }
 
-function runReconciliation(database, invoiceId, loaders) {
-  const invoice = loaders.getInvoiceForReconcile(invoiceId);
-  if (!invoice) {
-    throw new Error(`Invoice ${invoiceId} was not found.`);
-  }
-  if (!invoice.period_start || !invoice.period_end) {
-    throw new Error("Invoice is missing a reconciliation period.");
-  }
-
-  const lines = loaders.getInvoiceLines(invoiceId);
-  const { scopeStart, scopeEnd } = expandReconcilePeriod(invoice.period_start, invoice.period_end);
-  const scopedBatches = loaders.getBatchesInPeriod(scopeStart, scopeEnd);
-  const matchableBatches = loaders.getBatches ? loaders.getBatches() : scopedBatches;
+function runStoreReconciliation(database, loaders) {
+  const batches = loaders.getBatches();
+  const lines = loaders.getAllInvoiceLines();
+  const invoices = loaders.getInvoices();
+  const invoiceTotal = invoices.reduce((sum, invoice) => sum + Number(invoice.invoice_total), 0);
   const runAt = new Date().toISOString();
 
-  resetReconciliationState(database, invoiceId, scopeStart, scopeEnd);
+  resetStoreReconciliationState(database);
 
   const result = reconcile({
-    invoice,
+    invoiceTotal,
     lines,
-    scopedBatches,
-    matchableBatches,
+    scopedBatches: batches,
+    matchableBatches: batches,
   });
 
-  const runId = applyReconciliation(database, invoiceId, result, runAt);
-  return formatReconciliationResult(invoice, result, runAt, runId);
+  applyReconciliation(database, result, runAt);
+  return formatStoreReconciliationResult(result, runAt, invoices.length);
 }
 
 module.exports = {
-  runReconciliation,
-  formatReconciliationResult,
-  resetReconciliationState,
+  runStoreReconciliation,
+  formatStoreReconciliationResult,
+  resetStoreReconciliationState,
   applyReconciliation,
   buildExceptions,
   buildMatchedRows,

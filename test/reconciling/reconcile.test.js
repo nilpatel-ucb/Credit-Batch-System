@@ -303,11 +303,11 @@ function testStoreReconcileIntegration() {
   assert.strictEqual(insertResult.reconciliation.summary.missingFromInvoiceCount, 1);
   assert.strictEqual(insertResult.reconciliation.summary.totalMissingCredit, 2578.36);
 
-  const rerun = manager.reconcileInvoice(insertResult.invoiceId);
+  const rerun = manager.reconcileStore();
   assert.strictEqual(rerun.summary.matchedCount, 2);
   assert.strictEqual(rerun.summary.missingFromInvoiceCount, 1);
 
-  const last = manager.getLastReconciliationRun(insertResult.invoiceId);
+  const last = manager.getStoreReconciliation();
   assert.ok(last);
   assert.strictEqual(last.summary.matchedCount, 2);
   assert.strictEqual(last.exceptions.length, 1);
