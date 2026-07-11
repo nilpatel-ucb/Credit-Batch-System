@@ -509,9 +509,14 @@ function createStoreManager(storesDir) {
       .get(invoiceNumber);
 
     if (existing) {
-      throw new Error(
-        `Invoice ${invoiceNumber} was already uploaded on ${formatProcessedAt(existing.processed_at)}.`
-      );
+      return {
+        skipped: true,
+        duplicate: true,
+        invoiceNumber,
+        uploadedAt: existing.processed_at,
+        uploadedAtLabel: formatProcessedAt(existing.processed_at),
+        lineCount: 0,
+      };
     }
 
     const normalizedLines = batchLines.map((line) => Normalize.toInvoiceDbLine(line));

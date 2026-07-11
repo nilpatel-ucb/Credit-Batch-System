@@ -290,6 +290,28 @@ const InvoiceIngestUI = (() => {
     return pdfFilesFromList(event.dataTransfer?.files);
   }
 
+  const DUPLICATE_INVOICE_RE = /Invoice (.+) was already uploaded on (.+?)\.?(\s|$)/;
+
+  function parseDuplicateInvoiceError(err) {
+    const message = String(err?.message || err || "");
+    const match = message.match(DUPLICATE_INVOICE_RE);
+    if (!match) return null;
+    return {
+      invoiceNumber: match[1],
+      uploadedAt: match[2].trim(),
+    };
+  }
+
+  function removeHandledItems(handledFilenames) {
+    pendingItems = pendingItems.filter((item) => !handledFilenames.has(item.filename));
+    renderPreview();
+    setConfirmEnabled(validItems().length > 0);
+  }
+
+  function formatDuplicateLabel(entry) {
+    return `Invoice ${entry.invoiceNumber} from "${entry.filename}" (uploaded ${entry.uploadedAt})`;
+  }
+
   async function confirmIngest(onComplete) {
     const items = validItems();
     if (!items.length) return;
@@ -297,33 +319,83 @@ const InvoiceIngestUI = (() => {
     let lastResult = null;
     let savedCount = 0;
     let totalLines = 0;
+    const duplicates = [];
+    const handledFilenames = new Set();
 
-    try {
-      for (const item of items) {
+    for (const item of items) {
+      try {
         lastResult = await window.api.insertInvoice(
           item.summary,
           item.batchLines,
           item.filename
         );
+
+        if (lastResult?.skipped && lastResult?.duplicate) {
+          duplicates.push({
+            filename: item.filename,
+            invoiceNumber: lastResult.invoiceNumber || item.summary.invoiceNumber,
+            uploadedAt: lastResult.uploadedAtLabel || lastResult.uploadedAt || "a previous date",
+          });
+          handledFilenames.add(item.filename);
+          continue;
+        }
+
         savedCount += 1;
         totalLines += lastResult.lineCount;
-      }
+        handledFilenames.add(item.filename);
+      } catch (err) {
+        const duplicate = parseDuplicateInvoiceError(err);
+        if (duplicate) {
+          duplicates.push({
+            filename: item.filename,
+            invoiceNumber: duplicate.invoiceNumber,
+            uploadedAt: duplicate.uploadedAt,
+          });
+          handledFilenames.add(item.filename);
+          continue;
+        }
 
+        removeHandledItems(handledFilenames);
+        showStatus(err.message || "Failed to save invoice.", "error");
+        return;
+      }
+    }
+
+    removeHandledItems(handledFilenames);
+
+    const statusParts = [];
+    let statusType = "info";
+
+    if (savedCount > 0) {
+      statusParts.push(
+        `Saved ${savedCount} invoice${savedCount === 1 ? "" : "s"} (${totalLines} line${totalLines === 1 ? "" : "s"}).`
+      );
       const reconciliation = lastResult?.reconciliation;
       const summary = reconciliation?.summary;
-      const statusParts = [
-        `Saved ${savedCount} invoice${savedCount === 1 ? "" : "s"} (${totalLines} line${totalLines === 1 ? "" : "s"}).`,
-      ];
       if (summary) {
         statusParts.push(
           `${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} missing from invoice, ${StoreSelector.formatMoney(summary.totalMissingCredit)} missing credit.`
         );
       }
-      showStatus(statusParts.join(" "), "success");
-      clearPreview();
-      if (onComplete) await onComplete(lastResult);
-    } catch (err) {
-      showStatus(err.message || "Failed to save invoice.", "error");
+      statusType = "success";
+    }
+
+    if (duplicates.length > 0) {
+      const duplicateLabels = duplicates.map(formatDuplicateLabel).join("; ");
+      const skipPrefix =
+        duplicates.length === 1
+          ? "Skipped 1 invoice already uploaded"
+          : `Skipped ${duplicates.length} invoices already uploaded`;
+      statusParts.push(`${skipPrefix}: ${duplicateLabels}.`);
+      if (savedCount === 0) {
+        statusType = "info";
+      }
+    }
+
+    showStatus(statusParts.join(" "), statusType);
+
+    if (savedCount > 0 && onComplete) {
+      await onComplete(lastResult);
     }
   }
 

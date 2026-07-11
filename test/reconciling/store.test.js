@@ -306,10 +306,10 @@ function testRejectDuplicateInvoiceNumber() {
   const { summary, batchLines } = sampleInvoicePayload();
   manager.insertInvoice(summary, batchLines, "eft-a.pdf");
 
-  assert.throws(
-    () => manager.insertInvoice(summary, batchLines, "eft-b.pdf"),
-    /was already uploaded/
-  );
+  const duplicate = manager.insertInvoice(summary, batchLines, "eft-b.pdf");
+  assert.strictEqual(duplicate.skipped, true);
+  assert.strictEqual(duplicate.duplicate, true);
+  assert.strictEqual(duplicate.invoiceNumber, summary.invoiceNumber);
 
   manager.close();
   fs.rmSync(dir, { recursive: true, force: true });
