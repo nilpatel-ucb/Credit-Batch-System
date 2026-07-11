@@ -556,6 +556,57 @@ function testBatchIngestWithoutInvoicesLeavesBatchesUnmatched() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+function testTotalMissingCreditCountsOnlyMissingFromInvoice() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+
+  manager.insertBatches(
+    [
+      {
+        site_id: "309359",
+        batch_date: "2026-03-30",
+        batch_number: "0319",
+        gross_amount: 2900,
+        total_fee: 82.27,
+        net_amount: 2817.73,
+      },
+      {
+        site_id: "309359",
+        batch_date: "2026-03-31",
+        batch_number: "0341",
+        gross_amount: 2643.8,
+        total_fee: 65.44,
+        net_amount: 2578.36,
+      },
+    ],
+    "chevron.pdf"
+  );
+
+  const { summary, batchLines } = sampleInvoicePayload();
+  batchLines[0] = {
+    ...batchLines[0],
+    amount: -2700,
+  };
+
+  manager.insertInvoice(summary, batchLines, "eft.pdf");
+
+  const reconciliation = manager.getStoreReconciliation();
+  assert.strictEqual(reconciliation.summary.totalMissingCredit, 2578.36);
+  assert.strictEqual(reconciliation.summary.missingFromInvoiceCount, 1);
+
+  const byNumber = Object.fromEntries(
+    manager.getBatches().map((batch) => [batch.batch_number, batch])
+  );
+  assert.strictEqual(byNumber["0319"].match_status, "mismatch");
+  assert.strictEqual(byNumber["0341"].match_status, "missing_from_invoice");
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 function testDeleteInvoiceClearsMissingFromInvoiceFlags() {
   const dir = makeTempStoresDir();
   const manager = createStoreManager(dir);
@@ -613,6 +664,7 @@ function run() {
   testDeleteInvoiceRemovesHeaderLinesAndResetsLinkedBatches();
   testBatchIngestAfterInvoiceAutoReconciles();
   testBatchIngestWithoutInvoicesLeavesBatchesUnmatched();
+  testTotalMissingCreditCountsOnlyMissingFromInvoice();
   testDeleteInvoiceClearsMissingFromInvoiceFlags();
   console.log("PASS store tests");
 }

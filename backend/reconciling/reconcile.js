@@ -119,6 +119,7 @@ function buildSummary(
   const totalDeposit = matchedPairs.reduce((sum, pair) => sum + Number(pair.batch.gross_amount), 0);
   const totalFee = matchedPairs.reduce((sum, pair) => sum + Number(pair.batch.total_fee), 0);
   const totalCredit = matchedPairs.reduce((sum, pair) => sum + Number(pair.batch.net_amount), 0);
+  // Only batches with no invoice line (missing from invoice) — not mismatches or unmatched rows.
   const totalMissingCredit = missingBatches.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
   const normalizedInvoiceTotal = round2(Number(invoiceTotal || 0));
 

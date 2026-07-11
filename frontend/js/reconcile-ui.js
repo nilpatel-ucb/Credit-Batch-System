@@ -1,6 +1,7 @@
 const ReconcileUI = (() => {
   let storeOpen = false;
   let onReconcileComplete = null;
+  let scopeBatches = [];
 
   function formatMatchStatus(status) {
     switch (status) {
@@ -18,7 +19,18 @@ const ReconcileUI = (() => {
     }
   }
 
-  function rowStatusClass(status) {
+  function batchRowStatusClass(status) {
+    switch (status) {
+      case "matched":
+        return "row-reconcile-matched";
+      case "missing_from_invoice":
+        return "row-reconcile-missing";
+      default:
+        return "";
+    }
+  }
+
+  function lineRowStatusClass(status) {
     switch (status) {
       case "matched":
         return "row-reconcile-matched";
@@ -30,6 +42,23 @@ const ReconcileUI = (() => {
       default:
         return "";
     }
+  }
+
+  function sumMissingFromInvoiceCredit(batches) {
+    if (!batches || batches.length === 0) {
+      return 0;
+    }
+
+    return batches
+      .filter((batch) => batch.match_status === "missing_from_invoice")
+      .reduce((sum, batch) => sum + Number(batch.net_amount), 0);
+  }
+
+  function missingCreditValue(summary, batches = scopeBatches) {
+    if (batches && batches.length > 0) {
+      return sumMissingFromInvoiceCredit(batches);
+    }
+    return Number(summary?.totalMissingCredit || 0);
   }
 
   function setStatus(message, type = "info") {
@@ -49,9 +78,9 @@ const ReconcileUI = (() => {
     document.getElementById("reconcile-run-btn").disabled = !enabled;
   }
 
-  function renderSummary(summary) {
+  function renderSummary(summary, batches = scopeBatches) {
     const missingEl = document.getElementById("reconcile-missing-credit");
-    const missingValue = Number(summary?.totalMissingCredit || 0);
+    const missingValue = missingCreditValue(summary, batches);
     missingEl.textContent =
       summary != null ? StoreSelector.formatMoney(missingValue) : "—";
     missingEl.classList.toggle("highlight-warning", missingValue > 0);
@@ -99,7 +128,7 @@ const ReconcileUI = (() => {
 
     tbody.innerHTML = batches
       .map(
-        (batch) => `<tr class="${rowStatusClass(batch.match_status)}">
+        (batch) => `<tr class="${batchRowStatusClass(batch.match_status)}">
           <td>${StoreSelector.formatDate(batch.batch_date)}</td>
           <td>${StoreSelector.stripLeadingZeros(batch.batch_number)}</td>
           <td class="num">${StoreSelector.formatMoney(batch.net_amount)}</td>
@@ -121,7 +150,7 @@ const ReconcileUI = (() => {
 
     tbody.innerHTML = lines
       .map(
-        (line) => `<tr class="${rowStatusClass(line.match_status)}">
+        (line) => `<tr class="${lineRowStatusClass(line.match_status)}">
           <td>${line.invoice_number || ""}</td>
           <td>${line.invoice_line_id}</td>
           <td>${StoreSelector.stripLeadingZeros(line.batch_number)}</td>
@@ -135,28 +164,31 @@ const ReconcileUI = (() => {
 
   function renderScope(scope) {
     if (!scope) {
+      scopeBatches = [];
       renderBatchesTable([]);
       renderLinesTable([]);
       return;
     }
 
+    scopeBatches = scope.batches;
     renderBatchesTable(scope.batches);
     renderLinesTable(scope.lines);
   }
 
-  function render(result) {
+  function render(result, batches = scopeBatches) {
     if (!result) {
       renderSummary(null);
       renderCoverage(null);
       return;
     }
 
-    renderSummary(result.summary);
+    renderSummary(result.summary, batches);
     renderCoverage(result);
   }
 
   function resetView() {
     setControlsEnabled(false);
+    scopeBatches = [];
     renderSummary(null);
     renderCoverage(null);
     renderBatchesTable([]);
@@ -177,7 +209,7 @@ const ReconcileUI = (() => {
 
     const lastResult = await window.api.getLastReconciliation();
     if (lastResult) {
-      render(lastResult);
+      render(lastResult, scope?.batches);
       const runAt = lastResult.runAt ? StoreSelector.formatDateTime(lastResult.runAt) : "";
       setStatus(runAt ? `Last reconciled ${runAt}.` : "", "info");
     } else if (scope && (scope.batches.length > 0 || scope.lines.length > 0)) {
@@ -208,12 +240,11 @@ const ReconcileUI = (() => {
 
     try {
       const result = await window.api.reconcileStore();
-      render(result);
       await loadScope();
 
       const summary = result.summary;
       setStatus(
-        `Reconciled store: ${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} batches missing from invoices, ${summary.unmatchedLineCount} unmatched lines, ${StoreSelector.formatMoney(summary.totalMissingCredit)} missing credit.`,
+        `Reconciled store: ${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} batches missing from invoices, ${summary.unmatchedLineCount} unmatched lines, ${StoreSelector.formatMoney(missingCreditValue(summary))} missing credit.`,
         summary.missingFromInvoiceCount > 0 || summary.unmatchedLineCount > 0 ? "info" : "success"
       );
 
