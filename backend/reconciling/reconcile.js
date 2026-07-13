@@ -2,6 +2,14 @@ const Normalize = require("../parsing/normalize");
 
 const RECONCILE_DATE_BUFFER_DAYS = 7;
 
+const BATCH_MATCH_STATUS = {
+  MATCHED: "matched",
+  MISSING: "missing_from_invoice",
+  REVERSED: "reversed",
+  OVER_CREDITED: "over_credited",
+  MISMATCH: "mismatch",
+};
+
 function round2(value) {
   return Math.round(Number(value) * 100) / 100;
 }
@@ -41,96 +49,114 @@ function amountsMatch(lineAmount, batchNetAmount) {
   return round2(Math.abs(Number(lineAmount))) === round2(Number(batchNetAmount));
 }
 
-function compareBatchCandidates(a, b, invDate) {
-  const distA = dateDistanceDays(a.batch_date, invDate);
-  const distB = dateDistanceDays(b.batch_date, invDate);
-  if (distA !== distB) {
-    return distA - distB;
+function groupLinesByBatchNumber(lines) {
+  const groups = new Map();
+  for (const line of lines) {
+    const key = normalizeBatchNumber(line.batch_number);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(line);
   }
-
-  const dateCmp = String(a.batch_date).localeCompare(String(b.batch_date));
-  if (dateCmp !== 0) {
-    return dateCmp;
-  }
-
-  return Number(a.id) - Number(b.id);
+  return groups;
 }
 
-function pickBatchCandidate(candidates, invDate) {
-  if (candidates.length === 0) {
-    return { batch: null, ambiguous: false };
-  }
-
-  const sorted = [...candidates].sort((a, b) => compareBatchCandidates(a, b, invDate));
-  if (sorted.length > 1) {
-    const firstDist = dateDistanceDays(sorted[0].batch_date, invDate);
-    const secondDist = dateDistanceDays(sorted[1].batch_date, invDate);
-    if (firstDist === secondDist && sorted[0].batch_date === sorted[1].batch_date) {
-      return { batch: null, ambiguous: true };
-    }
-  }
-
-  return { batch: sorted[0], ambiguous: false };
+function computeNetEft(lines) {
+  return round2(lines.reduce((sum, line) => sum + Number(line.amount), 0));
 }
 
-function findBatchCandidates(line, scopedBatches, usedBatchIds) {
-  const targetNumber = normalizeBatchNumber(line.batch_number);
+function computeBatchNetTotal(batches) {
+  return round2(batches.reduce((sum, batch) => sum + Number(batch.net_amount), 0));
+}
 
-  return scopedBatches.filter((batch) => {
-    if (usedBatchIds.has(batch.id)) {
-      return false;
+/** All unused Chevron rows with this batch number — date does not split them. */
+function pickBatchesForNumber(candidates) {
+  return [...candidates].sort((a, b) => {
+    const dateCmp = String(a.batch_date).localeCompare(String(b.batch_date));
+    if (dateCmp !== 0) {
+      return dateCmp;
     }
-    if (normalizeBatchNumber(batch.batch_number) !== targetNumber) {
-      return false;
-    }
-    return amountsMatch(line.amount, batch.net_amount);
+    return Number(a.id) - Number(b.id);
   });
 }
 
-function findAmountMismatchBatch(line, matchableBatches, usedBatchIds) {
-  const targetNumber = normalizeBatchNumber(line.batch_number);
+function classifyNetMatch(netEft, batchNetAmount, lineCount, batchCount = 1) {
+  const net = round2(Number(netEft));
+  const batchNet = round2(Number(batchNetAmount));
+  const absNet = round2(Math.abs(net));
+  const lineLabel = lineCount === 1 ? "1 invoice line" : `${lineCount} invoice lines`;
+  const batchLabel = batchCount === 1 ? "batch net" : `${batchCount} batch nets totaling`;
 
-  const candidates = matchableBatches.filter((batch) => {
-    if (usedBatchIds.has(batch.id)) {
-      return false;
-    }
-    if (normalizeBatchNumber(batch.batch_number) !== targetNumber) {
-      return false;
-    }
-    return !amountsMatch(line.amount, batch.net_amount);
-  });
-
-  if (candidates.length === 0) {
-    return null;
+  if (net === 0) {
+    return {
+      status: BATCH_MATCH_STATUS.REVERSED,
+      message: `Net EFT is zero across ${lineLabel} — credit was fully reversed.`,
+    };
   }
 
-  return [...candidates].sort((a, b) => compareBatchCandidates(a, b, line.inv_date))[0];
+  if (net < 0 && absNet === batchNet) {
+    return {
+      status: BATCH_MATCH_STATUS.MATCHED,
+      message: `Net EFT credit ${batchNet} matches ${batchLabel} ${batchNet} across ${lineLabel}.`,
+    };
+  }
+
+  if (net < 0 && absNet > batchNet) {
+    return {
+      status: BATCH_MATCH_STATUS.OVER_CREDITED,
+      message: `Net EFT credit ${absNet} exceeds ${batchLabel} ${batchNet} across ${lineLabel}.`,
+    };
+  }
+
+  if (net < 0 && absNet < batchNet) {
+    return {
+      status: BATCH_MATCH_STATUS.MISMATCH,
+      message: `Net EFT credit ${absNet} is less than ${batchLabel} ${batchNet} across ${lineLabel}.`,
+    };
+  }
+
+  return {
+    status: BATCH_MATCH_STATUS.MISMATCH,
+    message: `Net EFT ${net} does not match expected credit of -${batchNet} across ${lineLabel}.`,
+  };
 }
 
 function buildSummary(
   invoiceTotal,
   scopedBatches,
-  matchedPairs,
+  batchGroups,
   missingBatches,
-  unmatchedLines,
-  ambiguousLines,
-  mismatchPairs
+  unmatchedLineGroups,
+  ambiguousGroups
 ) {
-  const totalDeposit = matchedPairs.reduce((sum, pair) => sum + Number(pair.batch.gross_amount), 0);
-  const totalFee = matchedPairs.reduce((sum, pair) => sum + Number(pair.batch.total_fee), 0);
-  const totalCredit = matchedPairs.reduce((sum, pair) => sum + Number(pair.batch.net_amount), 0);
-  // Only batches with no invoice line (missing from invoice) — not mismatches or unmatched rows.
+  const matchedGroups = batchGroups.filter((group) => group.status === BATCH_MATCH_STATUS.MATCHED);
+  const matchedBatches = matchedGroups.flatMap((group) => group.batches);
+  const totalDeposit = matchedBatches.reduce((sum, batch) => sum + Number(batch.gross_amount), 0);
+  const totalFee = matchedBatches.reduce((sum, batch) => sum + Number(batch.total_fee), 0);
+  const totalCredit = matchedBatches.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
   const totalMissingCredit = missingBatches.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
   const normalizedInvoiceTotal = round2(Number(invoiceTotal || 0));
 
+  const unmatchedLineCount = unmatchedLineGroups.reduce((sum, group) => sum + group.lines.length, 0);
+  const ambiguousLineCount = ambiguousGroups.reduce((sum, group) => sum + group.lines.length, 0);
+  const reconciledLineCount = batchGroups.reduce((sum, group) => sum + group.lines.length, 0);
+
   return {
     scopedBatchCount: scopedBatches.length,
-    lineCount: unmatchedLines.length + ambiguousLines.length + matchedPairs.length,
-    matchedCount: matchedPairs.length,
+    lineCount: reconciledLineCount + unmatchedLineCount + ambiguousLineCount,
+    matchedCount: matchedBatches.length,
     missingFromInvoiceCount: missingBatches.length,
-    unmatchedLineCount: unmatchedLines.length,
-    ambiguousLineCount: ambiguousLines.length,
-    mismatchCount: mismatchPairs.length,
+    reversedCount: batchGroups
+      .filter((group) => group.status === BATCH_MATCH_STATUS.REVERSED)
+      .reduce((sum, group) => sum + group.batches.length, 0),
+    overCreditedCount: batchGroups
+      .filter((group) => group.status === BATCH_MATCH_STATUS.OVER_CREDITED)
+      .reduce((sum, group) => sum + group.batches.length, 0),
+    mismatchCount: batchGroups
+      .filter((group) => group.status === BATCH_MATCH_STATUS.MISMATCH)
+      .reduce((sum, group) => sum + group.batches.length, 0),
+    unmatchedLineCount,
+    ambiguousLineCount,
     totalDeposit: round2(totalDeposit),
     totalFee: round2(totalFee),
     totalCredit: round2(totalCredit),
@@ -140,57 +166,116 @@ function buildSummary(
   };
 }
 
+function flattenMatchedPairs(batchGroups) {
+  const matchedPairs = [];
+  for (const group of batchGroups) {
+    if (group.status !== BATCH_MATCH_STATUS.MATCHED) {
+      continue;
+    }
+    for (const line of group.lines) {
+      matchedPairs.push({
+        line,
+        batch: group.batch,
+        batches: group.batches,
+        invoiceAmount: round2(Math.abs(Number(group.netEft))),
+        netEft: group.netEft,
+      });
+    }
+  }
+  return matchedPairs;
+}
+
+function flattenMismatchPairs(batchGroups) {
+  return batchGroups
+    .filter(
+      (group) =>
+        group.status === BATCH_MATCH_STATUS.MISMATCH ||
+        group.status === BATCH_MATCH_STATUS.OVER_CREDITED ||
+        group.status === BATCH_MATCH_STATUS.REVERSED
+    )
+    .flatMap((group) =>
+      group.lines.map((line) => ({
+        line,
+        batch: group.batch,
+        batches: group.batches,
+        status: group.status,
+        netEft: group.netEft,
+        message: group.message,
+      }))
+    );
+}
+
+function flattenUnmatchedLines(unmatchedLineGroups) {
+  return unmatchedLineGroups.flatMap((group) =>
+    group.lines.map((line) => ({
+      line,
+      message: group.message,
+    }))
+  );
+}
+
+function flattenAmbiguousLines(ambiguousGroups) {
+  return ambiguousGroups.flatMap((group) =>
+    group.lines.map((line) => ({
+      line,
+      message: group.message,
+    }))
+  );
+}
+
 function reconcile({ invoice, invoiceTotal, lines, scopedBatches, matchableBatches }) {
   const resolvedInvoiceTotal =
     invoiceTotal != null ? invoiceTotal : invoice ? Number(invoice.invoice_total) : 0;
   const searchableBatches = matchableBatches || scopedBatches;
   const usedBatchIds = new Set();
-  const matchedPairs = [];
-  const unmatchedLines = [];
-  const ambiguousLines = [];
-  const mismatchPairs = [];
+  const lineGroups = groupLinesByBatchNumber(lines);
+  const batchGroups = [];
+  const unmatchedLineGroups = [];
+  const ambiguousGroups = [];
 
-  // Pass 1: exact matches (batch number + amount) for every line first, so a
-  // mismatch pairing can never consume a batch another line matches exactly.
-  const leftoverLines = [];
+  for (const [, groupLines] of lineGroups) {
+    const netEft = computeNetEft(groupLines);
+    const batchNum = normalizeBatchNumber(groupLines[0].batch_number);
 
-  for (const line of lines) {
-    const candidates = findBatchCandidates(line, searchableBatches, usedBatchIds);
-    const { batch, ambiguous } = pickBatchCandidate(candidates, line.inv_date);
+    const candidates = searchableBatches.filter((batch) => {
+      if (usedBatchIds.has(batch.id)) {
+        return false;
+      }
+      return normalizeBatchNumber(batch.batch_number) === batchNum;
+    });
 
-    if (ambiguous) {
-      ambiguousLines.push({ line, message: "Multiple batch candidates with the same date proximity." });
+    if (candidates.length === 0) {
+      unmatchedLineGroups.push({
+        batchNumber: batchNum,
+        lines: groupLines,
+        netEft,
+        message: "No matching batch found in store for these invoice lines.",
+      });
       continue;
     }
 
-    if (batch) {
+    const cluster = pickBatchesForNumber(candidates);
+    const batchNetTotal = computeBatchNetTotal(cluster);
+    const { status, message } = classifyNetMatch(
+      netEft,
+      batchNetTotal,
+      groupLines.length,
+      cluster.length
+    );
+
+    for (const batch of cluster) {
       usedBatchIds.add(batch.id);
-      matchedPairs.push({
-        line,
-        batch,
-        invoiceAmount: round2(Math.abs(Number(line.amount))),
-      });
-      continue;
     }
 
-    leftoverLines.push(line);
-  }
-
-  // Pass 2: only lines with no exact match may claim a same-number batch as an
-  // amount mismatch.
-  for (const line of leftoverLines) {
-    const mismatchBatch = findAmountMismatchBatch(line, searchableBatches, usedBatchIds);
-    if (mismatchBatch) {
-      usedBatchIds.add(mismatchBatch.id);
-      mismatchPairs.push({
-        line,
-        batch: mismatchBatch,
-        message: `Batch number matches but amounts differ (invoice ${round2(Math.abs(Number(line.amount)))} vs batch ${round2(Number(mismatchBatch.net_amount))}).`,
-      });
-      continue;
-    }
-
-    unmatchedLines.push({ line, message: "No matching batch found in store for this invoice line." });
+    batchGroups.push({
+      batch: cluster[0],
+      batches: cluster,
+      batchNetTotal,
+      lines: groupLines,
+      netEft,
+      status,
+      message,
+    });
   }
 
   const missingBatches = scopedBatches
@@ -203,19 +288,21 @@ function reconcile({ invoice, invoiceTotal, lines, scopedBatches, matchableBatch
   const summary = buildSummary(
     resolvedInvoiceTotal,
     scopedBatches,
-    matchedPairs,
+    batchGroups,
     missingBatches.map((entry) => entry.batch),
-    unmatchedLines,
-    ambiguousLines,
-    mismatchPairs
+    unmatchedLineGroups,
+    ambiguousGroups
   );
 
   return {
-    matchedPairs,
+    batchGroups,
     missingBatches,
-    unmatchedLines,
-    ambiguousLines,
-    mismatchPairs,
+    unmatchedLineGroups,
+    ambiguousGroups,
+    matchedPairs: flattenMatchedPairs(batchGroups),
+    unmatchedLines: flattenUnmatchedLines(unmatchedLineGroups),
+    ambiguousLines: flattenAmbiguousLines(ambiguousGroups),
+    mismatchPairs: flattenMismatchPairs(batchGroups),
     summary,
   };
 }
@@ -228,5 +315,10 @@ module.exports = {
   dateDistanceDays,
   addDaysToIsoDate,
   expandReconcilePeriod,
+  computeNetEft,
+  computeBatchNetTotal,
+  pickBatchesForNumber,
+  classifyNetMatch,
+  BATCH_MATCH_STATUS,
   RECONCILE_DATE_BUFFER_DAYS,
 };

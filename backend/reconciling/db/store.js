@@ -705,7 +705,6 @@ function createStoreManager(storesDir) {
       return null;
     }
 
-    const batchById = new Map(batches.map((batch) => [batch.id, batch]));
     const invoiceTotal = invoices.reduce((sum, invoice) => sum + Number(invoice.invoice_total), 0);
     const runAt = batches.reduce((latest, batch) => {
       if (!batch.last_reconciled_at) return latest;
@@ -713,27 +712,37 @@ function createStoreManager(storesDir) {
       return latest;
     }, null);
 
-    const matched = lines
-      .filter((line) => line.match_status === "matched" && line.batch_id)
-      .map((line) => {
-        const batch = batchById.get(line.batch_id);
-        if (!batch) return null;
-        return {
-          batchId: batch.id,
-          batchDate: batch.batch_date,
-          batchNumber: batch.batch_number,
-          grossAmount: batch.gross_amount,
-          totalFee: batch.total_fee,
-          netAmount: batch.net_amount,
-          invoiceLineId: line.invoice_line_id,
-          invoiceNumber: line.invoice_number,
-          invoiceAmount: Math.abs(Number(line.amount)),
-          invDate: line.inv_date,
-        };
-      })
-      .filter(Boolean);
+    const matchedBatchIds = new Set();
+    const matched = [];
+    for (const batch of batches) {
+      if (batch.match_status !== "matched") {
+        continue;
+      }
+      if (matchedBatchIds.has(batch.id)) {
+        continue;
+      }
+      matchedBatchIds.add(batch.id);
+      const linkedLines = lines.filter((line) => line.batch_id === batch.id);
+      const primaryLine = linkedLines.find((line) => Number(line.amount) < 0) || linkedLines[0];
+      matched.push({
+        batchId: batch.id,
+        batchDate: batch.batch_date,
+        batchNumber: batch.batch_number,
+        grossAmount: batch.gross_amount,
+        totalFee: batch.total_fee,
+        netAmount: batch.net_amount,
+        invoiceLineId: linkedLines.map((line) => line.invoice_line_id).join(", "),
+        invoiceNumber: primaryLine ? primaryLine.invoice_number : null,
+        invoiceAmount: batch.invoice_amount != null ? Number(batch.invoice_amount) : null,
+        lineCount: linkedLines.length,
+        invDate: primaryLine ? primaryLine.inv_date : null,
+      });
+    }
 
     const missingBatches = batches.filter((batch) => batch.match_status === "missing_from_invoice");
+    const reversedBatches = batches.filter((batch) => batch.match_status === "reversed");
+    const overCreditedBatches = batches.filter((batch) => batch.match_status === "over_credited");
+    const mismatchBatches = batches.filter((batch) => batch.match_status === "mismatch");
     const totalMissingCredit = missingBatches.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
     const matchedCount = matched.length;
     const totalDeposit = matched.reduce((sum, row) => sum + Number(row.grossAmount), 0);
@@ -741,7 +750,6 @@ function createStoreManager(storesDir) {
     const totalCredit = matched.reduce((sum, row) => sum + Number(row.netAmount), 0);
     const unmatchedLineCount = lines.filter((line) => line.match_status === "unmatched").length;
     const ambiguousLineCount = lines.filter((line) => line.match_status === "ambiguous").length;
-    const mismatchCount = lines.filter((line) => line.match_status === "mismatch").length;
 
     const exceptions = [];
     for (const batch of missingBatches) {
@@ -754,6 +762,23 @@ function createStoreManager(storesDir) {
         invoiceLineId: null,
         invoiceAmount: null,
         message: "Batch has no matching invoice line.",
+      });
+    }
+
+    for (const batch of [...reversedBatches, ...overCreditedBatches, ...mismatchBatches]) {
+      const linkedLines = lines.filter((line) => line.batch_id === batch.id);
+      const netEft = linkedLines.reduce((sum, line) => sum + Number(line.amount), 0);
+      exceptions.push({
+        type: batch.match_status,
+        batchId: batch.id,
+        batchDate: batch.batch_date,
+        batchNumber: batch.batch_number,
+        netAmount: batch.net_amount,
+        netEft: Math.round(netEft * 100) / 100,
+        invoiceLineId: linkedLines.map((line) => line.invoice_line_id).join(", "),
+        invoiceAmount: netEft,
+        lineCount: linkedLines.length,
+        message: `${batch.match_status} for batch ${batch.batch_number}.`,
       });
     }
 
@@ -780,20 +805,6 @@ function createStoreManager(storesDir) {
           invoiceAmount: line.amount,
           message: "Multiple batch candidates with the same date proximity.",
         });
-      } else if (line.match_status === "mismatch" && line.batch_id) {
-        const batch = batchById.get(line.batch_id);
-        exceptions.push({
-          type: "mismatch",
-          batchId: line.batch_id,
-          batchDate: batch ? batch.batch_date : null,
-          batchNumber: line.batch_number,
-          netAmount: batch ? batch.net_amount : null,
-          invoiceLineId: line.invoice_line_id,
-          invoiceAmount: line.amount,
-          message: batch
-            ? `Batch number matches but amounts differ (invoice ${Math.abs(Number(line.amount))} vs batch ${batch.net_amount}).`
-            : "Batch number matches but amounts differ.",
-        });
       }
     }
 
@@ -805,9 +816,11 @@ function createStoreManager(storesDir) {
         lineCount: lines.length,
         matchedCount,
         missingFromInvoiceCount: missingBatches.length,
+        reversedCount: reversedBatches.length,
+        overCreditedCount: overCreditedBatches.length,
+        mismatchCount: mismatchBatches.length,
         unmatchedLineCount,
         ambiguousLineCount,
-        mismatchCount,
         totalDeposit: Math.round(totalDeposit * 100) / 100,
         totalFee: Math.round(totalFee * 100) / 100,
         totalCredit: Math.round(totalCredit * 100) / 100,

@@ -9,6 +9,10 @@ const ReconcileUI = (() => {
         return "Matched";
       case "missing_from_invoice":
         return "Missing from invoice";
+      case "reversed":
+        return "Reversed (net zero)";
+      case "over_credited":
+        return "Over-credited";
       case "mismatch":
         return "Amount mismatch";
       case "ambiguous":
@@ -24,6 +28,9 @@ const ReconcileUI = (() => {
       case "matched":
         return "row-reconcile-matched";
       case "missing_from_invoice":
+      case "reversed":
+      case "over_credited":
+      case "mismatch":
         return "row-reconcile-missing";
       default:
         return "";
@@ -35,6 +42,8 @@ const ReconcileUI = (() => {
       case "matched":
         return "row-reconcile-matched";
       case "missing_from_invoice":
+      case "reversed":
+      case "over_credited":
       case "mismatch":
       case "unmatched":
       case "ambiguous":
@@ -107,12 +116,19 @@ const ReconcileUI = (() => {
     const summary = result.summary;
     const invoiceLabel =
       result.invoiceCount === 1 ? "1 invoice" : `${result.invoiceCount} invoices`;
-    const text = `Store ledger: ${summary.scopedBatchCount} batches, ${summary.lineCount} invoice lines across ${invoiceLabel}, ${summary.missingFromInvoiceCount} batches missing from invoices, ${summary.unmatchedLineCount} unmatched lines.`;
+    const reversedCount = summary.reversedCount || 0;
+    const overCreditedCount = summary.overCreditedCount || 0;
+    const mismatchCount = summary.mismatchCount || 0;
+    const text = `Store ledger: ${summary.scopedBatchCount} batches, ${summary.lineCount} invoice lines across ${invoiceLabel}, ${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} missing from invoices, ${reversedCount} reversed, ${overCreditedCount} over-credited, ${mismatchCount} amount mismatches, ${summary.unmatchedLineCount} unmatched lines.`;
     document.getElementById("reconcile-coverage").textContent = text;
 
     const warningEl = document.getElementById("reconcile-coverage-warning");
     const showWarning =
-      summary.missingFromInvoiceCount > 0 || summary.unmatchedLineCount > 0;
+      summary.missingFromInvoiceCount > 0 ||
+      summary.unmatchedLineCount > 0 ||
+      reversedCount > 0 ||
+      overCreditedCount > 0 ||
+      mismatchCount > 0;
     warningEl.hidden = !showWarning;
   }
 
@@ -243,9 +259,15 @@ const ReconcileUI = (() => {
       await loadScope();
 
       const summary = result.summary;
+      const issueCount =
+        summary.missingFromInvoiceCount +
+        (summary.reversedCount || 0) +
+        (summary.overCreditedCount || 0) +
+        (summary.mismatchCount || 0) +
+        summary.unmatchedLineCount;
       setStatus(
-        `Reconciled store: ${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} batches missing from invoices, ${summary.unmatchedLineCount} unmatched lines, ${StoreSelector.formatMoney(missingCreditValue(summary))} missing credit.`,
-        summary.missingFromInvoiceCount > 0 || summary.unmatchedLineCount > 0 ? "info" : "success"
+        `Reconciled store: ${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} missing from invoices, ${summary.reversedCount || 0} reversed, ${summary.overCreditedCount || 0} over-credited, ${summary.mismatchCount || 0} amount mismatches, ${summary.unmatchedLineCount} unmatched lines, ${StoreSelector.formatMoney(missingCreditValue(summary))} missing credit.`,
+        issueCount > 0 ? "info" : "success"
       );
 
       if (onReconcileComplete) {
