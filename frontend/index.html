@@ -3,65 +3,451 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'">
   <title>Credit Batch Reconciler</title>
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-  <div class="container">
-    <header class="app-header">
-      <h1>Credit Batch Reconciler</h1>
-      <p class="subtitle">Per-store batch ledger — Chevron settlement and EFT invoice ingest</p>
-    </header>
-
-    <div class="layout" id="app-layout">
-      <button
-        type="button"
-        id="store-sidebar-open-btn"
-        class="store-sidebar-open-btn"
-        hidden
-        aria-label="Show stores sidebar"
-        title="Show stores"
-      >
-        Stores
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 3l7 4v10l-7 4-7-4V7l7-4z" stroke="#fff" stroke-width="1.6"/>
+            <path d="M8.5 12.2l2.4 2.4 4.6-4.9" stroke="#0E9F6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div>
+          <h1>Credit Batch Reconciler</h1>
+          <p id="brand-sub">Select a store</p>
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <div class="store-switch" id="store-switch" role="tablist" aria-label="Stores"></div>
+      <button type="button" class="btn-ghost" id="manage-stores-btn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 15.5a3.5 3.5 0 100-7 3.5 3.5 0 000 7z" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9c.3.6.9 1 1.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+        </svg>
+        Manage
       </button>
+      <button type="button" class="btn-ghost" id="add-pdf-btn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Add PDF
+      </button>
+    </div>
 
-      <aside class="panel store-panel" id="store-sidebar" aria-label="Stores sidebar">
-        <div class="store-panel-header">
-          <h2>Stores</h2>
-          <button
-            type="button"
-            id="store-sidebar-close-btn"
-            class="store-sidebar-toggle"
-            aria-label="Hide stores sidebar"
-            title="Hide stores"
-          >
-            Hide
-          </button>
+    <p id="active-store" class="sr-only">No store selected</p>
+    <span id="batch-count-badge" class="sr-only" aria-hidden="true">0</span>
+    <span id="invoice-count-badge" class="sr-only" aria-hidden="true">0</span>
+    <span id="reconciled-run-count-badge" class="sr-only" aria-hidden="true">0</span>
+
+    <div class="hero">
+      <div class="card gauge-card lift">
+        <div class="gauge-head">
+          <h2>Credit received</h2>
+          <span id="gauge-period">—</span>
         </div>
-        <div class="store-panel-body">
-          <div id="store-list" class="store-list"></div>
-          <form id="create-store-form" class="store-form">
-            <input type="text" id="new-store-name" placeholder="Store name" required>
-            <input type="text" id="new-store-site-id" placeholder="Chevron site ID (5–6 digits)" required pattern="\d{5,6}" inputmode="numeric" title="Enter the 5–6 digit site ID from Chevron PDFs">
-            <button type="submit">Add store</button>
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 200 200" aria-hidden="true">
+            <circle cx="100" cy="100" r="84" fill="none" stroke="var(--bg-deep)" stroke-width="16"/>
+            <circle id="arc-green" cx="100" cy="100" r="84" fill="none" stroke="var(--green)" stroke-width="16" stroke-linecap="round" stroke-dasharray="0 528"/>
+            <circle id="arc-red" cx="100" cy="100" r="84" fill="none" stroke="var(--red)" stroke-width="16" stroke-linecap="round" stroke-dasharray="0 528"/>
+            <circle id="arc-slate" cx="100" cy="100" r="84" fill="none" stroke="var(--slate)" stroke-width="16" stroke-linecap="round" stroke-dasharray="0 528"/>
+          </svg>
+          <div class="gauge-center">
+            <div class="pct" id="gauge-pct">0%</div>
+            <div class="lbl">received</div>
+            <div class="amt" id="gauge-amt">$0.00</div>
+          </div>
+        </div>
+        <div class="legend">
+          <div class="legend-row">
+            <span class="swatch sw-green"></span>
+            <span class="name">Received on invoice</span>
+            <span class="val" id="leg-received">–</span>
+          </div>
+          <div class="legend-row">
+            <span class="swatch sw-red"></span>
+            <span class="name">Missing from invoice</span>
+            <span class="val" id="leg-missing">–</span>
+          </div>
+          <div class="legend-row">
+            <span class="swatch sw-slate"></span>
+            <span class="name">Not yet reconciled</span>
+            <span class="val" id="leg-pending">–</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="card stat lift">
+          <div class="k">
+            <span class="ic ic-blue" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 17l5-6 4 3 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            Total deposit
+          </div>
+          <div>
+            <div class="v" id="reconcile-total-deposit">–</div>
+            <div class="sub" id="st-deposit-sub">matched batches, gross</div>
+          </div>
+        </div>
+        <div class="card stat lift">
+          <div class="k">
+            <span class="ic ic-slate" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 6v12M8 9.5C8 8 9.5 7 12 7s4 1 4 2.5S14.5 12 12 12s-4 1-4 2.5S9.5 17 12 17s4-1 4-2.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </span>
+            Total fees
+          </div>
+          <div>
+            <div class="v" id="reconcile-total-fee">–</div>
+            <div class="sub">processor fees on matched batches</div>
+          </div>
+        </div>
+        <div class="card stat lift">
+          <div class="k">
+            <span class="ic ic-green" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12l4.5 4.5L19 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            Net credit
+          </div>
+          <div>
+            <div class="v pos" id="reconcile-total-credit">–</div>
+            <div class="sub">deposit − fees</div>
+          </div>
+        </div>
+        <div class="card stat lift">
+          <div class="k">
+            <span class="ic ic-red" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 8v5m0 3.5v.1M10.3 4.6L3.2 17a2 2 0 001.7 3h14.2a2 2 0 001.7-3L13.7 4.6a2 2 0 00-3.4 0z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </span>
+            Credit discrepancy
+          </div>
+          <div>
+            <div class="v" id="reconcile-credit-gap">–</div>
+            <div class="sub" id="st-disc-sub">invoice total − matched net</div>
+          </div>
+        </div>
+
+        <div class="coverage" id="coverage">
+          <span id="reconcile-coverage">Open a store to see reconciliation coverage.</span>
+          <span id="reconcile-coverage-warning" class="warn" hidden>
+            Batch corpus may be incomplete — treat discrepancy as provisional
+          </span>
+          <span class="sr-only">
+            Invoice amount <span id="reconcile-invoice-amount">—</span>
+            Missing credit <span id="reconcile-missing-credit">—</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="Sections">
+      <button type="button" class="tab active" data-panel="batches" role="tab" aria-selected="true">
+        Batches <span class="count" id="ct-batches">0</span>
+      </button>
+      <button type="button" class="tab" data-panel="recons" role="tab" aria-selected="false">
+        Reconciliations <span class="count" id="ct-recons">0</span>
+      </button>
+      <button type="button" class="tab" data-panel="invoices" role="tab" aria-selected="false">
+        Invoices <span class="count" id="ct-invoices">0</span>
+      </button>
+    </div>
+
+    <div class="panel show" id="panel-batches" role="tabpanel">
+      <div class="card table-card">
+        <div class="table-toolbar">
+          <h3>Batch ledger</h3>
+          <div class="batch-search-row toolbar-search">
+            <label class="sr-only" for="batch-search-input">Search by batch #</label>
+            <input
+              type="search"
+              id="batch-search-input"
+              placeholder="Search batch #"
+              inputmode="numeric"
+              autocomplete="off"
+              disabled
+            >
+            <button type="button" id="batch-search-clear-btn" class="btn-ghost btn-compact" disabled>Clear</button>
+          </div>
+          <div class="spacer"></div>
+          <div class="meta" id="batch-meta"></div>
+        </div>
+        <p id="batch-search-hint" class="batch-search-hint" hidden></p>
+        <div id="batch-search-results" class="batch-search-results" hidden>
+          <div id="batch-search-open-batches" class="batch-search-section">
+            <h4 class="reconcile-subheading">
+              Open batches
+              <span id="batch-search-open-batches-count" class="badge">0</span>
+            </h4>
+            <div class="table-wrap">
+              <table id="batch-search-open-batches-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Batch #</th>
+                    <th class="num">Net Amount</th>
+                    <th>Status</th>
+                    <th>Source PDF</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="batch-search-open-lines" class="batch-search-section">
+            <h4 class="reconcile-subheading">
+              Open invoice lines
+              <span id="batch-search-open-lines-count" class="badge">0</span>
+            </h4>
+            <div class="table-wrap">
+              <table id="batch-search-open-lines-table">
+                <thead>
+                  <tr>
+                    <th>Invoice #</th>
+                    <th>Invoice Line ID</th>
+                    <th>Batch #</th>
+                    <th>Date</th>
+                    <th class="num">Amount</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="batch-search-reconciled" class="batch-search-section">
+            <h4 class="reconcile-subheading">
+              Reconciled matches
+              <span id="batch-search-reconciled-count" class="badge">0</span>
+            </h4>
+            <div class="table-wrap">
+              <table id="batch-search-reconciled-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Batch #</th>
+                    <th class="num">Net Amount</th>
+                    <th>Invoice #</th>
+                    <th>Invoice Line ID</th>
+                    <th class="num">Invoice Amount</th>
+                    <th>Confirmed</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="batches-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Batch #</th>
+                <th class="num">Gross</th>
+                <th class="num">Fee</th>
+                <th class="num">Net</th>
+                <th>Status</th>
+                <th>Invoice line</th>
+                <th class="num">Invoice amt</th>
+                <th>Source PDF</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="empty-row">
+                <td colspan="10">Open a store to view batches</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="batch-lines-panel" class="detail-panel" hidden>
+          <div class="detail-panel-header">
+            <h3>Source upload — <span id="batch-lines-title">—</span></h3>
+            <div class="detail-panel-actions">
+              <button type="button" id="delete-batch-source-btn" class="danger" hidden>Delete upload</button>
+              <button type="button" id="collapse-batch-lines-btn" class="btn-ghost btn-compact">Collapse</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="batch-lines-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Batch #</th>
+                  <th class="num">Gross</th>
+                  <th class="num">Fee</th>
+                  <th class="num">Net</th>
+                  <th>Site ID</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-recons" role="tabpanel" hidden>
+      <section id="reconciliation-section" class="reconciliation-section">
+        <div class="card recon-controls-card">
+          <div class="recon-controls-head">
+            <div>
+              <h3>Open reconciliation</h3>
+              <p class="section-hint">Reconcile to preview matches, then Confirm to archive matched pairs.</p>
+            </div>
+            <div class="reconcile-controls">
+              <button type="button" id="reconcile-run-btn" class="primary" disabled>Reconcile store</button>
+              <button type="button" id="reconcile-confirm-btn" class="btn-ghost" disabled>Confirm matches</button>
+            </div>
+          </div>
+          <div id="reconcile-status" class="status-message" hidden></div>
+        </div>
+
+        <div class="recon-comparison-grid">
+          <div class="card reconcile-comparison-panel">
+            <h4 class="reconcile-subheading">
+              Open batches <span id="reconcile-batch-count" class="badge">0</span>
+            </h4>
+            <div class="table-wrap">
+              <table id="reconcile-batches-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Batch #</th>
+                    <th class="num">Net Amount</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="empty-row">
+                    <td colspan="4">Open a store with batches to reconcile</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card reconcile-comparison-panel">
+            <h4 class="reconcile-subheading">
+              Open invoice lines <span id="reconcile-line-count" class="badge">0</span>
+            </h4>
+            <div class="table-wrap">
+              <table id="reconcile-lines-table">
+                <thead>
+                  <tr>
+                    <th>Invoice #</th>
+                    <th>Invoice Line ID</th>
+                    <th>Batch #</th>
+                    <th>Date</th>
+                    <th class="num">Amount</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="empty-row">
+                    <td colspan="6">Open a store with invoices to reconcile</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="reconciled-section">
+          <div class="section-header reconciled-header">
+            <h3>Confirmed runs</h3>
+            <p class="section-hint">Expand a run to see its matched pairs</p>
+          </div>
+          <div id="reconciled-runs-list" class="recon-grid">
+            <p class="empty-hint">No confirmed reconciliations yet</p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="panel" id="panel-invoices" role="tabpanel" hidden>
+      <div class="inv-grid" id="inv-grid">
+        <p class="empty-hint">Open a store to view invoices</p>
+      </div>
+      <!-- Compatibility hooks for delete/detail helpers -->
+      <table id="invoices-table" class="sr-only" aria-hidden="true">
+        <tbody></tbody>
+      </table>
+      <div id="invoice-lines-panel" class="detail-panel" hidden>
+        <div class="detail-panel-header">
+          <h3>Invoice lines — <span id="invoice-lines-title">—</span></h3>
+          <div class="detail-panel-actions">
+            <button type="button" id="invoice-lines-delete-btn" class="danger" hidden>Delete invoice</button>
+            <button type="button" id="collapse-invoice-lines-btn" class="btn-ghost btn-compact">Collapse</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="invoice-lines-table">
+            <thead>
+              <tr>
+                <th>Invoice Line ID</th>
+                <th>Batch #</th>
+                <th>Date</th>
+                <th class="num">Amount</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage stores modal -->
+  <div class="modal" id="manage-stores-modal" hidden>
+    <div class="modal-backdrop" data-close-modal="manage-stores-modal"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="manage-stores-title">
+      <div class="modal-head">
+        <h2 id="manage-stores-title">Manage stores</h2>
+        <button type="button" class="btn-ghost btn-compact" data-close-modal="manage-stores-modal" aria-label="Close">Close</button>
+      </div>
+      <div class="modal-body">
+        <div id="store-list" class="store-list"></div>
+        <form id="create-store-form" class="store-form">
+          <h3>Add store</h3>
+          <input type="text" id="new-store-name" placeholder="Store name" required>
+          <input type="text" id="new-store-site-id" placeholder="Chevron site ID (5–6 digits)" required pattern="\d{5,6}" inputmode="numeric" title="Enter the 5–6 digit site ID from Chevron PDFs">
+          <button type="submit" class="primary">Add store</button>
+        </form>
+        <section id="edit-store-section" class="edit-store-section" hidden>
+          <h3>Edit active store</h3>
+          <form id="edit-store-form" class="store-form">
+            <input type="text" id="edit-store-name" placeholder="Store name" required>
+            <input type="text" id="edit-store-site-id" placeholder="Chevron site ID (5–6 digits)" required pattern="\d{5,6}" inputmode="numeric" title="Enter the 5–6 digit site ID from Chevron PDFs">
+            <button type="submit" class="primary">Save changes</button>
           </form>
-          <p id="active-store" class="active-store">No store selected</p>
-          <section id="edit-store-section" class="edit-store-section" hidden>
-            <h3>Edit active store</h3>
-            <form id="edit-store-form" class="store-form">
-              <input type="text" id="edit-store-name" placeholder="Store name" required>
-              <input type="text" id="edit-store-site-id" placeholder="Chevron site ID (5–6 digits)" required pattern="\d{5,6}" inputmode="numeric" title="Enter the 5–6 digit site ID from Chevron PDFs">
-              <button type="submit">Save changes</button>
-            </form>
-            <p id="edit-store-status" class="edit-store-status" hidden></p>
-          </section>
-        </div>
-      </aside>
-<!-- this is where we have columns for the preview table -->
-      <main class="panel main-panel">
-        <section class="ingest-section">
-          <h2>Add Chevron PDF</h2>
+          <p id="edit-store-status" class="edit-store-status" hidden></p>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add PDF modal -->
+  <div class="modal" id="add-pdf-modal" hidden>
+    <div class="modal-backdrop" data-close-modal="add-pdf-modal"></div>
+    <div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="add-pdf-title">
+      <div class="modal-head">
+        <h2 id="add-pdf-title">Add PDF</h2>
+        <button type="button" class="btn-ghost btn-compact" data-close-modal="add-pdf-modal" aria-label="Close">Close</button>
+      </div>
+      <div class="modal-tabs" role="tablist" aria-label="PDF type">
+        <button type="button" class="tab active" data-ingest-panel="chevron" role="tab">Chevron settlement</button>
+        <button type="button" class="tab" data-ingest-panel="eft" role="tab">EFT invoice</button>
+      </div>
+      <div class="modal-body">
+        <section class="ingest-section" id="ingest-panel-chevron">
           <div id="dropzone" class="dropzone" tabindex="0">
             <p>Drop one or more Chevron settlement PDFs here, or click to browse</p>
             <input type="file" id="pdf-input" accept="application/pdf" multiple hidden>
@@ -79,9 +465,9 @@
                   <tr>
                     <th>Date</th>
                     <th>Batch #</th>
-                    <th>Credit</th>
-                    <th>Fee</th>
-                    <th>After Fee Credit</th>
+                    <th class="num">Credit</th>
+                    <th class="num">Fee</th>
+                    <th class="num">After Fee Credit</th>
                     <th>Site ID</th>
                   </tr>
                 </thead>
@@ -90,13 +476,12 @@
             </div>
             <div class="preview-actions">
               <button type="button" id="confirm-ingest-btn" class="primary">Confirm and save</button>
-              <button type="button" id="cancel-preview-btn">Cancel</button>
+              <button type="button" id="cancel-preview-btn" class="btn-ghost">Cancel</button>
             </div>
           </div>
         </section>
 
-        <section class="ingest-section invoice-ingest-section">
-          <h2>Add EFT PDF</h2>
+        <section class="ingest-section" id="ingest-panel-eft" hidden>
           <div id="invoice-dropzone" class="dropzone" tabindex="0">
             <p>Drop one or more EFT prenotification PDFs here, or click to browse</p>
             <input type="file" id="invoice-pdf-input" accept="application/pdf" multiple hidden>
@@ -122,7 +507,7 @@
                     <th>Invoice Line ID</th>
                     <th>Batch #</th>
                     <th>Date</th>
-                    <th>Amount</th>
+                    <th class="num">Amount</th>
                   </tr>
                 </thead>
                 <tbody></tbody>
@@ -130,266 +515,11 @@
             </div>
             <div class="preview-actions">
               <button type="button" id="confirm-invoice-btn" class="primary">Confirm and save</button>
-              <button type="button" id="cancel-invoice-preview-btn">Cancel</button>
+              <button type="button" id="cancel-invoice-preview-btn" class="btn-ghost">Cancel</button>
             </div>
           </div>
         </section>
-
-        <section class="batches-section collapsible-section">
-          <details class="section-disclosure">
-            <summary class="section-header">
-              <h2>Batches <span id="batch-count-badge" class="badge">0</span></h2>
-              <p class="section-hint">Click an upload to view batches, or delete an entire source upload</p>
-            </summary>
-            <div class="section-disclosure-body">
-              <div class="table-wrap">
-                <table id="batches-table">
-                  <thead>
-                    <tr>
-                      <th>Source PDF</th>
-                      <th>Batches</th>
-                      <th>Period</th>
-                      <th>Total Credit</th>
-                      <th>Fee</th>
-                      <th>Total After Fee Credit</th>
-                      <th>Ingested</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr class="empty-row">
-                      <td colspan="8">Open a store to view batches</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div id="batch-lines-panel" class="detail-panel" hidden>
-                <div class="detail-panel-header">
-                  <h3>Batches — <span id="batch-lines-title">—</span></h3>
-                  <div class="detail-panel-actions">
-                    <button type="button" id="delete-batch-source-btn" class="danger" hidden>Delete upload</button>
-                    <button type="button" id="collapse-batch-lines-btn" class="collapse-btn">Collapse</button>
-                  </div>
-                </div>
-                <div class="table-wrap">
-                  <table id="batch-lines-table">
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Batch #</th>
-                        <th>Total Credit</th>
-                        <th>Fee</th>
-                        <th>Total After Fee Credit</th>
-                        <th>Site ID</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody></tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </details>
-        </section>
-
-        <section class="invoices-section collapsible-section">
-          <details class="section-disclosure">
-            <summary class="section-header">
-              <h2>Invoices <span id="invoice-count-badge" class="badge">0</span></h2>
-              <p class="section-hint">Click an invoice to view lines, or delete an entire invoice upload</p>
-            </summary>
-            <div class="section-disclosure-body">
-              <div class="table-wrap">
-                <table id="invoices-table">
-                  <thead>
-                    <tr>
-                      <th>Invoice #</th>
-                      <th>Total</th>
-                      <th>Balance</th>
-                      <th>Period</th>
-                      <th>Lines</th>
-                      <th>Source PDF</th>
-                      <th>Processed</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr class="empty-row">
-                      <td colspan="8">Open a store to view invoices</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div id="invoice-lines-panel" class="detail-panel" hidden>
-                <div class="detail-panel-header">
-                  <h3>Invoice lines — <span id="invoice-lines-title">—</span></h3>
-                  <div class="detail-panel-actions">
-                    <button type="button" id="invoice-lines-delete-btn" class="danger" hidden>Delete invoice</button>
-                    <button type="button" id="collapse-invoice-lines-btn" class="collapse-btn">Collapse</button>
-                  </div>
-                </div>
-                <div class="table-wrap">
-                  <table id="invoice-lines-table">
-                    <thead>
-                      <tr>
-                        <th>Invoice Line ID</th>
-                        <th>Batch #</th>
-                        <th>Date</th>
-                        <th>Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody></tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </details>
-        </section>
-
-        <section class="batch-search-section">
-          <label class="batch-search-label" for="batch-search-input">Search by batch #</label>
-          <div class="batch-search-row">
-            <input
-              type="search"
-              id="batch-search-input"
-              placeholder="e.g. 9087"
-              inputmode="numeric"
-              autocomplete="off"
-              disabled
-            >
-            <button type="button" id="batch-search-clear-btn" disabled>Clear</button>
-          </div>
-          <p id="batch-search-hint" class="batch-search-hint" hidden></p>
-          <div id="batch-search-reconciled" class="batch-search-reconciled" hidden>
-            <h4 class="reconcile-subheading">
-              Reconciled matches
-              <span id="batch-search-reconciled-count" class="badge">0</span>
-            </h4>
-            <div class="table-wrap">
-              <table id="batch-search-reconciled-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Batch #</th>
-                    <th>Net Amount</th>
-                    <th>Invoice #</th>
-                    <th>Invoice Line ID</th>
-                    <th>Invoice Amount</th>
-                    <th>Confirmed</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-
-        <section id="reconciliation-section" class="reconciliation-section">
-          <div class="section-header">
-            <h2>Reconciliation</h2>
-            <p class="section-hint">Reconcile to preview matches, then Confirm to archive matched pairs. Unmatched stay here in red.</p>
-          </div>
-
-          <div class="reconcile-controls">
-            <button type="button" id="reconcile-run-btn" class="primary" disabled>Reconcile store</button>
-            <button type="button" id="reconcile-confirm-btn" disabled>Confirm matches</button>
-          </div>
-
-          <div id="reconcile-status" class="status-message" hidden></div>
-
-          <div class="reconcile-summary-grid">
-            <div class="reconcile-summary-item">
-              <span class="label">Total Deposit</span>
-              <span id="reconcile-total-deposit" class="value">—</span>
-            </div>
-            <div class="reconcile-summary-item">
-              <span class="label">Total Fee</span>
-              <span id="reconcile-total-fee" class="value">—</span>
-            </div>
-            <div class="reconcile-summary-item">
-              <span class="label">Matched Credit</span>
-              <span id="reconcile-total-credit" class="value">—</span>
-            </div>
-            <div class="reconcile-summary-item">
-              <span class="label">Total Invoiced</span>
-              <span id="reconcile-invoice-amount" class="value">—</span>
-            </div>
-            <div class="reconcile-summary-item">
-              <span class="label">Credit Discrepancy</span>
-              <span id="reconcile-credit-gap" class="value">—</span>
-            </div>
-            <div class="reconcile-summary-item reconcile-summary-item-emphasis">
-              <span class="label">Missing Credit</span>
-              <span id="reconcile-missing-credit" class="value">—</span>
-            </div>
-          </div>
-
-          <p id="reconcile-coverage" class="reconcile-coverage"></p>
-          <p id="reconcile-coverage-warning" class="reconcile-coverage-warning" hidden>
-            Review missing batches and unmatched lines before treating the credit discrepancy as final.
-          </p>
-
-          <div class="reconcile-comparison-grid">
-            <div class="reconcile-comparison-panel">
-              <h4 class="reconcile-subheading">Open batches <span id="reconcile-batch-count" class="badge">0</span></h4>
-              <div class="table-wrap">
-                <table id="reconcile-batches-table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Batch #</th>
-                      <th>Net Amount</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr class="empty-row">
-                      <td colspan="4">Open a store with batches to reconcile</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div class="reconcile-comparison-panel">
-              <h4 class="reconcile-subheading">Open invoice lines <span id="reconcile-line-count" class="badge">0</span></h4>
-              <div class="table-wrap">
-                <table id="reconcile-lines-table">
-                  <thead>
-                    <tr>
-                      <th>Invoice #</th>
-                      <th>Invoice Line ID</th>
-                      <th>Batch #</th>
-                      <th>Date</th>
-                      <th>Amount</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr class="empty-row">
-                      <td colspan="6">Open a store with invoices to reconcile</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="reconciled-section collapsible-section">
-          <details class="section-disclosure">
-            <summary class="section-header">
-              <h2>Reconciled <span id="reconciled-run-count-badge" class="badge">0</span></h2>
-              <p class="section-hint">Confirmed match runs — expand a run to see its matched pairs</p>
-            </summary>
-            <div class="section-disclosure-body">
-              <div id="reconciled-runs-list" class="reconciled-runs-list">
-                <p class="empty-hint">No confirmed reconciliations yet</p>
-              </div>
-            </div>
-          </details>
-        </section>
-      </main>
+      </div>
     </div>
   </div>
 
@@ -397,6 +527,7 @@
   <script src="js/batch-ingest-ui.js"></script>
   <script src="js/invoice-ingest-ui.js"></script>
   <script src="js/reconcile-ui.js"></script>
+  <script src="js/dashboard-ui.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

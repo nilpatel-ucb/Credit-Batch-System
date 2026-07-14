@@ -2,6 +2,8 @@ const App = (() => {
   let selectedInvoiceId = null;
   let selectedBatchGroupIndex = null;
   let cachedBatchGroups = [];
+  let cachedBatches = [];
+  let cachedInvoices = [];
 
   function formatPeriod(start, end) {
     if (!start || !end) return "";
@@ -31,30 +33,24 @@ const App = (() => {
     return [...groups.values()].sort((a, b) => b.ingested_at.localeCompare(a.ingested_at));
   }
 
-  function summarizeBatchGroup(group) {
-    const dates = group.batches.map((b) => b.batch_date).sort();
-    const periodStart = dates[0];
-    const periodEnd = dates[dates.length - 1];
-
-    return {
-      count: group.batches.length,
-      period: formatPeriod(periodStart, periodEnd),
-      gross: group.batches.reduce((sum, b) => sum + b.gross_amount, 0),
-      fee: group.batches.reduce((sum, b) => sum + b.total_fee, 0),
-      net: group.batches.reduce((sum, b) => sum + b.net_amount, 0),
-    };
+  function findGroupIndexForBatch(batch) {
+    return cachedBatchGroups.findIndex(
+      (group) =>
+        group.source_pdf === (batch.source_pdf || "") &&
+        group.ingested_at === batch.ingested_at
+    );
   }
 
   function renderBatchLineRows(batches) {
     return batches
       .map(
         (b) => `<tr data-batch-id="${b.id}">
-          <td>${StoreSelector.formatDate(b.batch_date)}</td>
-          <td>${StoreSelector.stripLeadingZeros(b.batch_number)}</td>
+          <td class="mono">${StoreSelector.formatDate(b.batch_date)}</td>
+          <td class="mono">${StoreSelector.stripLeadingZeros(b.batch_number)}</td>
           <td class="num">${StoreSelector.formatMoney(b.gross_amount)}</td>
           <td class="num">${StoreSelector.formatMoney(b.total_fee)}</td>
           <td class="num">${StoreSelector.formatMoney(b.net_amount)}</td>
-          <td>${b.site_id}</td>
+          <td class="mono">${b.site_id}</td>
           <td><button type="button" class="danger batch-delete-btn" data-batch-id="${b.id}" data-batch-number="${b.batch_number}" data-batch-date="${b.batch_date}">Delete</button></td>
         </tr>`
       )
@@ -65,6 +61,9 @@ const App = (() => {
     selectedInvoiceId = null;
     document.getElementById("invoice-lines-panel").hidden = true;
     document.getElementById("invoice-lines-delete-btn").hidden = true;
+    document.querySelectorAll("#inv-grid .inv-card.open").forEach((card) => {
+      card.classList.remove("open");
+    });
     document.querySelectorAll("#invoices-table tbody tr.selected").forEach((row) => {
       row.classList.remove("selected");
     });
@@ -86,23 +85,44 @@ const App = (() => {
     document.getElementById("invoice-lines-delete-btn").hidden = false;
 
     const tbody = document.querySelector("#invoice-lines-table tbody");
-    if (lines.length === 0) {
-      tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="4">No lines found for this invoice</td></tr>';
-    } else {
-      tbody.innerHTML = lines
-        .map(
-          (line) => `<tr>
-          <td>${line.invoice_line_id}</td>
-          <td>${StoreSelector.stripLeadingZeros(line.batch_number)}</td>
-          <td>${StoreSelector.formatDate(line.inv_date)}</td>
-          <td class="num">${StoreSelector.formatMoney(line.amount)}</td>
-        </tr>`
-        )
-        .join("");
+    const cardBody = document.querySelector(
+      `#inv-grid .inv-card[data-invoice-id="${invoiceId}"] .inv-body-table`
+    );
+
+    const rowsHtml =
+      lines.length === 0
+        ? '<tr class="empty-row"><td colspan="5">No lines found for this invoice</td></tr>'
+        : lines
+            .map((line) => {
+              const [cls, label] = DashboardUI.statusPill(line.match_status);
+              return `<tr>
+                <td class="mono">${line.invoice_line_id}</td>
+                <td class="mono">${StoreSelector.stripLeadingZeros(line.batch_number)}</td>
+                <td class="mono">${StoreSelector.formatDate(line.inv_date)}</td>
+                <td class="num">${StoreSelector.formatMoney(line.amount)}</td>
+                <td><span class="pill ${cls}">${label}</span></td>
+              </tr>`;
+            })
+            .join("");
+
+    tbody.innerHTML = rowsHtml;
+    if (cardBody) {
+      cardBody.innerHTML = rowsHtml;
     }
 
-    document.getElementById("invoice-lines-panel").hidden = false;
+    document.getElementById("invoice-lines-panel").hidden = true;
+
+    document.querySelectorAll("#inv-grid .inv-card").forEach((card) => {
+      const open = Number(card.dataset.invoiceId) === invoiceId;
+      card.classList.toggle("open", open);
+    });
+
+    const compatRow = document.querySelector(
+      `#invoices-table tbody tr[data-invoice-id="${invoiceId}"]`
+    );
+    document.querySelectorAll("#invoices-table tbody tr").forEach((row) => {
+      row.classList.toggle("selected", row === compatRow);
+    });
   }
 
   function showBatchLines(groupIndex) {
@@ -127,51 +147,52 @@ const App = (() => {
     }
 
     document.getElementById("batch-lines-panel").hidden = false;
-  }
 
-  function highlightSelectedRows(tableSelector, selectedKey, keyAttribute) {
-    document.querySelectorAll(`${tableSelector} tbody tr`).forEach((row) => {
-      const isSelected = selectedKey != null && row.dataset[keyAttribute] === selectedKey;
-      row.classList.toggle("selected", isSelected);
-      const icon = row.querySelector(".expand-icon");
-      if (icon) {
-        icon.textContent = isSelected ? "▼" : "▶";
-      }
+    document.querySelectorAll("#batches-table tbody tr.batch-row").forEach((row) => {
+      const idx = Number(row.dataset.batchGroupIndex);
+      row.classList.toggle("selected", idx === groupIndex);
     });
   }
 
-  function highlightSelectedInvoiceRow() {
-    highlightSelectedRows("#invoices-table", String(selectedInvoiceId ?? ""), "invoiceId");
-  }
-
-  function highlightSelectedBatchGroupRow() {
-    highlightSelectedRows(
-      "#batches-table",
-      selectedBatchGroupIndex == null ? "" : String(selectedBatchGroupIndex),
-      "batchGroupIndex"
-    );
+  function syncTabCounts(batchCount, invoiceCount, reconCount) {
+    DashboardUI.updateCounts({
+      batches: batchCount,
+      invoices: invoiceCount,
+      recons: reconCount ?? Number(document.getElementById("ct-recons")?.textContent || 0),
+    });
   }
 
   async function renderBatches() {
     const tbody = document.querySelector("#batches-table tbody");
     const activeStore = StoreSelector.getActiveStore();
+    const meta = document.getElementById("batch-meta");
 
     if (!activeStore) {
       tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="8">Open a store to view batches</td></tr>';
+        '<tr class="empty-row"><td colspan="10">Open a store to view batches</td></tr>';
       document.getElementById("batch-count-badge").textContent = "0";
       cachedBatchGroups = [];
+      cachedBatches = [];
       clearBatchLinesPanel();
+      DashboardUI.updateGaugeFromBatches([]);
+      if (meta) meta.textContent = "";
+      syncTabCounts(0, cachedInvoices.length);
       return;
     }
 
     const batches = await window.api.getBatches();
+    cachedBatches = batches;
     document.getElementById("batch-count-badge").textContent = String(batches.length);
     cachedBatchGroups = groupBatches(batches);
+    DashboardUI.updateGaugeFromBatches(batches);
+    if (meta) {
+      meta.textContent = `${batches.length} rows · ${activeStore}.db`;
+    }
+    syncTabCounts(batches.length, cachedInvoices.length);
 
-    if (cachedBatchGroups.length === 0) {
+    if (batches.length === 0) {
       tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="8">No batches yet — upload a Chevron PDF</td></tr>';
+        '<tr class="empty-row"><td colspan="10">No batches yet — upload a Chevron PDF</td></tr>';
       clearBatchLinesPanel();
       return;
     }
@@ -184,24 +205,31 @@ const App = (() => {
       clearBatchLinesPanel();
     }
 
-    tbody.innerHTML = cachedBatchGroups
-      .map((group, index) => {
-        const summary = summarizeBatchGroup(group);
-        const label = group.source_pdf || "(unknown source)";
-        return `<tr class="expandable-row batch-group-row" data-batch-group-index="${index}">
-          <td><span class="expand-icon" aria-hidden="true"></span> ${label}</td>
-          <td>${summary.count}</td>
-          <td>${summary.period}</td>
-          <td class="num">${StoreSelector.formatMoney(summary.gross)}</td>
-          <td class="num">${StoreSelector.formatMoney(summary.fee)}</td>
-          <td class="num">${StoreSelector.formatMoney(summary.net)}</td>
-          <td>${StoreSelector.formatDateTime(group.ingested_at)}</td>
-          <td><button type="button" class="danger batch-source-delete-btn" data-batch-group-index="${index}">Delete upload</button></td>
+    let lastDate = null;
+    tbody.innerHTML = batches
+      .map((b) => {
+        const showDate = b.batch_date !== lastDate ? StoreSelector.formatDate(b.batch_date) : "";
+        lastDate = b.batch_date;
+        const [cls, label] = DashboardUI.statusPill(b.match_status);
+        const groupIndex = findGroupIndexForBatch(b);
+        return `<tr class="batch-row" data-batch-id="${b.id}" data-batch-group-index="${groupIndex}">
+          <td class="mono">${showDate}</td>
+          <td class="mono">${StoreSelector.stripLeadingZeros(b.batch_number)}</td>
+          <td class="num">${StoreSelector.formatMoney(b.gross_amount)}</td>
+          <td class="num">${StoreSelector.formatMoney(b.total_fee)}</td>
+          <td class="num">${StoreSelector.formatMoney(b.net_amount)}</td>
+          <td><span class="pill ${cls}">${label}</span></td>
+          <td class="mono">${b.invoice_line_id || "—"}</td>
+          <td class="num">${
+            b.invoice_amount != null ? StoreSelector.formatMoney(b.invoice_amount) : "—"
+          }</td>
+          <td class="mono" style="color:var(--ink-3);font-size:11.5px">${b.source_pdf || "—"}</td>
+          <td>
+            <button type="button" class="danger batch-delete-btn" data-batch-id="${b.id}" data-batch-number="${b.batch_number}" data-batch-date="${b.batch_date}">Delete</button>
+          </td>
         </tr>`;
       })
       .join("");
-
-    highlightSelectedBatchGroupRow();
 
     if (selectedBatchGroupIndex != null && cachedBatchGroups[selectedBatchGroupIndex]) {
       showBatchLines(selectedBatchGroupIndex);
@@ -209,24 +237,29 @@ const App = (() => {
   }
 
   async function renderInvoices() {
-    const tbody = document.querySelector("#invoices-table tbody");
+    const grid = document.getElementById("inv-grid");
+    const compatBody = document.querySelector("#invoices-table tbody");
     const activeStore = StoreSelector.getActiveStore();
 
     if (!activeStore) {
-      tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="8">Open a store to view invoices</td></tr>';
+      grid.innerHTML = '<p class="empty-hint">Open a store to view invoices</p>';
+      compatBody.innerHTML = "";
       document.getElementById("invoice-count-badge").textContent = "0";
+      cachedInvoices = [];
       ReconcileUI.resetView();
       clearInvoiceLinesPanel();
+      syncTabCounts(cachedBatches.length, 0);
       return;
     }
 
     const invoices = await window.api.getInvoices();
+    cachedInvoices = invoices;
     document.getElementById("invoice-count-badge").textContent = String(invoices.length);
+    syncTabCounts(cachedBatches.length, invoices.length);
 
     if (invoices.length === 0) {
-      tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="8">No invoices yet — upload an EFT PDF</td></tr>';
+      grid.innerHTML = '<p class="empty-hint">No invoices yet — upload an EFT PDF</p>';
+      compatBody.innerHTML = "";
       clearInvoiceLinesPanel();
       return;
     }
@@ -236,24 +269,55 @@ const App = (() => {
       clearInvoiceLinesPanel();
     }
 
-    tbody.innerHTML = invoices
+    compatBody.innerHTML = invoices
       .map(
-        (invoice) => `<tr class="expandable-row invoice-row" data-invoice-id="${invoice.id}" data-invoice-number="${invoice.invoice_number}">
-          <td><span class="expand-icon" aria-hidden="true"></span> ${invoice.invoice_number}</td>
-          <td class="num">${StoreSelector.formatMoney(invoice.invoice_total)}</td>
-          <td class="num">${invoice.invoice_balance == null ? "" : StoreSelector.formatMoney(invoice.invoice_balance)}</td>
-          <td>${formatPeriod(invoice.period_start, invoice.period_end)}</td>
-          <td>${invoice.line_count}</td>
-          <td>${invoice.pdf_filename || ""}</td>
-          <td>${StoreSelector.formatDateTime(invoice.processed_at)}</td>
-          <td class="invoice-actions-cell">
+        (invoice) => `<tr class="invoice-row" data-invoice-id="${invoice.id}" data-invoice-number="${invoice.invoice_number}">
+          <td>${invoice.invoice_number}</td>
+          <td>
             <button type="button" class="danger invoice-delete-btn" data-invoice-id="${invoice.id}" data-invoice-number="${invoice.invoice_number}" data-pdf-filename="${invoice.pdf_filename || ""}">Delete</button>
           </td>
         </tr>`
       )
       .join("");
 
-    highlightSelectedInvoiceRow();
+    grid.innerHTML = invoices
+      .map((invoice) => {
+        const open = selectedInvoiceId === invoice.id ? "open" : "";
+        return `<div class="card inv-card lift ${open}" data-invoice-id="${invoice.id}" data-invoice-number="${invoice.invoice_number}">
+          <div class="inv-head" data-invoice-toggle="${invoice.id}">
+            <div class="ic" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M7 3h8l4 4v14H7V3zM15 3v4h4M10 12h6M10 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div>
+              <h3>Invoice ${invoice.invoice_number}</h3>
+              <p>${invoice.pdf_filename || "—"} · ${formatPeriod(invoice.period_start, invoice.period_end) || "—"} · ${invoice.line_count} lines</p>
+            </div>
+            <div class="inv-total">
+              <div class="k">Invoice total</div>
+              <div class="v">${StoreSelector.formatMoney(invoice.invoice_total)}</div>
+            </div>
+            <button type="button" class="danger invoice-delete-btn" data-invoice-id="${invoice.id}" data-invoice-number="${invoice.invoice_number}" data-pdf-filename="${invoice.pdf_filename || ""}">Delete</button>
+            <svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="inv-body">
+            <table>
+              <thead>
+                <tr>
+                  <th>Line ID</th>
+                  <th>Batch #</th>
+                  <th>Date</th>
+                  <th class="num">Amount</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody class="inv-body-table">
+                <tr class="empty-row"><td colspan="5">Expand to load lines</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+      })
+      .join("");
 
     if (selectedInvoiceId != null) {
       const selected = invoices.find((invoice) => invoice.id === selectedInvoiceId);
@@ -273,10 +337,14 @@ const App = (() => {
     await Promise.all([renderBatches(), renderInvoices()]);
     if (active) {
       await ReconcileUI.onStoreOpen();
+    } else {
+      DashboardUI.updateBrand(null);
+      DashboardUI.updateGaugeFromBatches([]);
     }
   }
 
   async function onBatchIngestComplete() {
+    DashboardUI.closeAddPdfModal();
     await renderBatches();
     await renderInvoices();
     const activeStore = StoreSelector.getActiveStore();
@@ -286,31 +354,29 @@ const App = (() => {
     }
     await ReconcileUI.refresh();
     if (selectedInvoiceId != null) {
-      const row = document.querySelector(
-        `#invoices-table tr[data-invoice-id="${selectedInvoiceId}"]`
-      );
-      const invoiceNumber = row ? row.dataset.invoiceNumber : "—";
+      const invoice = cachedInvoices.find((inv) => inv.id === selectedInvoiceId);
+      const invoiceNumber = invoice ? invoice.invoice_number : "—";
       await showInvoiceLines(selectedInvoiceId, invoiceNumber);
-      highlightSelectedInvoiceRow();
     }
   }
 
   async function onInvoiceIngestComplete(result) {
+    if (result && result.invoiceId) {
+      DashboardUI.closeAddPdfModal();
+    }
     await renderInvoices();
     await renderBatches();
 
     if (result && result.invoiceId) {
       const invoiceNumber =
         result.reconciliation?.invoiceNumber ||
-        document.querySelector(`#invoices-table tr[data-invoice-id="${result.invoiceId}"]`)?.dataset
-          .invoiceNumber;
+        cachedInvoices.find((inv) => inv.id === result.invoiceId)?.invoice_number;
       if (invoiceNumber) {
         await showInvoiceLines(result.invoiceId, invoiceNumber);
-        highlightSelectedInvoiceRow();
       }
       if (result.reconciliation) {
         ReconcileUI.render(result.reconciliation);
-        document.getElementById("reconciliation-section").scrollIntoView({ behavior: "smooth" });
+        DashboardUI.showPanel("recons");
       }
       await ReconcileUI.refresh();
     }
@@ -320,12 +386,9 @@ const App = (() => {
     await Promise.all([renderBatches(), renderInvoices()]);
     await ReconcileUI.refresh();
     if (selectedInvoiceId != null) {
-      const row = document.querySelector(
-        `#invoices-table tr[data-invoice-id="${selectedInvoiceId}"]`
-      );
-      const invoiceNumber = row ? row.dataset.invoiceNumber : "—";
+      const invoice = cachedInvoices.find((inv) => inv.id === selectedInvoiceId);
+      const invoiceNumber = invoice ? invoice.invoice_number : "—";
       await showInvoiceLines(selectedInvoiceId, invoiceNumber);
-      highlightSelectedInvoiceRow();
     }
   }
 
@@ -347,22 +410,19 @@ const App = (() => {
   function initInvoiceLineSelection() {
     document.getElementById("collapse-invoice-lines-btn").addEventListener("click", () => {
       clearInvoiceLinesPanel();
-      highlightSelectedInvoiceRow();
     });
 
     document.getElementById("invoice-lines-delete-btn").addEventListener("click", async () => {
       if (selectedInvoiceId == null) return;
-      const row = document.querySelector(
-        `#invoices-table tr[data-invoice-id="${selectedInvoiceId}"]`
+      const invoice = cachedInvoices.find((inv) => inv.id === selectedInvoiceId);
+      await deleteInvoice(
+        selectedInvoiceId,
+        invoice?.invoice_number || "—",
+        invoice?.pdf_filename || ""
       );
-      const invoiceNumber = row ? row.dataset.invoiceNumber : "—";
-      const pdfFilename = row
-        ? row.querySelector(".invoice-delete-btn")?.dataset.pdfFilename || ""
-        : "";
-      await deleteInvoice(selectedInvoiceId, invoiceNumber, pdfFilename);
     });
 
-    document.querySelector("#invoices-table tbody").addEventListener("click", async (event) => {
+    document.getElementById("inv-grid").addEventListener("click", async (event) => {
       const deleteBtn = event.target.closest(".invoice-delete-btn");
       if (deleteBtn) {
         event.stopPropagation();
@@ -374,19 +434,19 @@ const App = (() => {
         return;
       }
 
-      const row = event.target.closest("tr.invoice-row");
-      if (!row) return;
+      const head = event.target.closest("[data-invoice-toggle]");
+      if (!head) return;
 
-      const invoiceId = Number(row.dataset.invoiceId);
-      const invoiceNumber = row.dataset.invoiceNumber;
+      const invoiceId = Number(head.dataset.invoiceToggle);
+      const card = head.closest(".inv-card");
+      const invoiceNumber = card?.dataset.invoiceNumber || "—";
+
       if (selectedInvoiceId === invoiceId) {
         clearInvoiceLinesPanel();
-        highlightSelectedInvoiceRow();
         return;
       }
 
       await showInvoiceLines(invoiceId, invoiceNumber);
-      highlightSelectedInvoiceRow();
     });
   }
 
@@ -411,17 +471,14 @@ const App = (() => {
       );
       if (groupIndex >= 0) {
         showBatchLines(groupIndex);
-        highlightSelectedBatchGroupRow();
       } else {
         clearBatchLinesPanel();
       }
     }
 
     if (selectedInvoiceId != null) {
-      const row = document.querySelector(
-        `#invoices-table tr[data-invoice-id="${selectedInvoiceId}"]`
-      );
-      const invoiceNumber = row ? row.dataset.invoiceNumber : "—";
+      const invoice = cachedInvoices.find((inv) => inv.id === selectedInvoiceId);
+      const invoiceNumber = invoice ? invoice.invoice_number : "—";
       await showInvoiceLines(selectedInvoiceId, invoiceNumber);
     }
   }
@@ -467,7 +524,6 @@ const App = (() => {
   function initBatchLineSelection() {
     document.getElementById("collapse-batch-lines-btn").addEventListener("click", () => {
       clearBatchLinesPanel();
-      highlightSelectedBatchGroupRow();
     });
 
     document.getElementById("delete-batch-source-btn").addEventListener("click", async () => {
@@ -476,25 +532,29 @@ const App = (() => {
     });
 
     document.querySelector("#batches-table tbody").addEventListener("click", async (event) => {
-      const deleteBtn = event.target.closest(".batch-source-delete-btn");
+      const deleteBtn = event.target.closest(".batch-delete-btn");
       if (deleteBtn) {
         event.stopPropagation();
-        await deleteBatchSource(Number(deleteBtn.dataset.batchGroupIndex));
+        await deleteBatch(
+          Number(deleteBtn.dataset.batchId),
+          deleteBtn.dataset.batchNumber,
+          deleteBtn.dataset.batchDate
+        );
         return;
       }
 
-      const row = event.target.closest("tr.batch-group-row");
+      const row = event.target.closest("tr.batch-row");
       if (!row) return;
 
       const groupIndex = Number(row.dataset.batchGroupIndex);
+      if (Number.isNaN(groupIndex) || groupIndex < 0) return;
+
       if (selectedBatchGroupIndex === groupIndex) {
         clearBatchLinesPanel();
-        highlightSelectedBatchGroupRow();
         return;
       }
 
       showBatchLines(groupIndex);
-      highlightSelectedBatchGroupRow();
     });
 
     document.querySelector("#batch-lines-table tbody").addEventListener("click", async (event) => {
@@ -511,6 +571,7 @@ const App = (() => {
   }
 
   function init() {
+    DashboardUI.init();
     initBatchLineSelection();
     initInvoiceLineSelection();
     StoreSelector.init({ onStoreChange });

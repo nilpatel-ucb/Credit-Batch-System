@@ -185,20 +185,91 @@ const ReconcileUI = (() => {
     hint.textContent = `Showing ${batchLabel}, ${lineLabel}, and ${reconciledLabel} for batch #${filtered.query}.`;
   }
 
-  function renderReconciledSearchResults(rows, query) {
-    const panel = document.getElementById("batch-search-reconciled");
-    const countEl = document.getElementById("batch-search-reconciled-count");
-    const tbody = document.querySelector("#batch-search-reconciled-table tbody");
+  function setBatchSearchResultsVisible(visible) {
+    const panel = document.getElementById("batch-search-results");
+    if (panel) panel.hidden = !visible;
+  }
 
+  function statusPillHtml(status) {
+    if (typeof DashboardUI !== "undefined") {
+      const [pillClass, pillLabel] = DashboardUI.statusPill(status);
+      return `<span class="pill ${pillClass}">${pillLabel}</span>`;
+    }
+    return formatMatchStatus(status);
+  }
+
+  function renderOpenBatchSearchResults(batches, query) {
+    const countEl = document.getElementById("batch-search-open-batches-count");
+    const tbody = document.querySelector("#batch-search-open-batches-table tbody");
+    if (!countEl || !tbody) return;
+
+    countEl.textContent = String(batches.length);
     if (!query) {
-      panel.hidden = true;
-      countEl.textContent = "0";
       tbody.innerHTML = "";
       return;
     }
 
-    panel.hidden = false;
+    if (!batches.length) {
+      tbody.innerHTML = `<tr class="empty-row"><td colspan="5">No open batches matching #${query}</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = sortBatches(batches)
+      .map(
+        (batch) => `<tr class="${batchRowStatusClass(batch.match_status)}">
+          <td class="mono">${StoreSelector.formatDate(batch.batch_date)}</td>
+          <td class="mono">${StoreSelector.stripLeadingZeros(batch.batch_number)}</td>
+          <td class="num">${StoreSelector.formatMoney(batch.net_amount)}</td>
+          <td>${statusPillHtml(batch.match_status)}</td>
+          <td class="mono" style="color:var(--ink-3);font-size:11.5px">${
+            batch.source_pdf || "—"
+          }</td>
+        </tr>`
+      )
+      .join("");
+  }
+
+  function renderOpenLineSearchResults(lines, query) {
+    const countEl = document.getElementById("batch-search-open-lines-count");
+    const tbody = document.querySelector("#batch-search-open-lines-table tbody");
+    if (!countEl || !tbody) return;
+
+    countEl.textContent = String(lines.length);
+    if (!query) {
+      tbody.innerHTML = "";
+      return;
+    }
+
+    if (!lines.length) {
+      tbody.innerHTML = `<tr class="empty-row"><td colspan="6">No open invoice lines matching #${query}</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = sortLines(lines)
+      .map(
+        (line) => `<tr class="${lineRowStatusClass(line.match_status)}">
+          <td class="mono">${line.invoice_number || ""}</td>
+          <td class="mono">${line.invoice_line_id}</td>
+          <td class="mono">${StoreSelector.stripLeadingZeros(line.batch_number)}</td>
+          <td class="mono">${StoreSelector.formatDate(line.inv_date)}</td>
+          <td class="num">${StoreSelector.formatMoney(line.amount)}</td>
+          <td>${statusPillHtml(line.match_status)}</td>
+        </tr>`
+      )
+      .join("");
+  }
+
+  function renderReconciledSearchResults(rows, query) {
+    const countEl = document.getElementById("batch-search-reconciled-count");
+    const tbody = document.querySelector("#batch-search-reconciled-table tbody");
+    if (!countEl || !tbody) return;
+
     countEl.textContent = String(rows.length);
+
+    if (!query) {
+      tbody.innerHTML = "";
+      return;
+    }
 
     if (!rows.length) {
       tbody.innerHTML = `<tr class="empty-row"><td colspan="7">No reconciled matches for #${query}</td></tr>`;
@@ -208,13 +279,13 @@ const ReconcileUI = (() => {
     tbody.innerHTML = rows
       .map(
         (row) => `<tr class="row-reconcile-matched">
-          <td>${StoreSelector.formatDate(row.batchDate)}</td>
-          <td>${StoreSelector.stripLeadingZeros(row.batchNumber)}</td>
+          <td class="mono">${StoreSelector.formatDate(row.batchDate)}</td>
+          <td class="mono">${StoreSelector.stripLeadingZeros(row.batchNumber)}</td>
           <td class="num">${
             row.netAmount != null ? StoreSelector.formatMoney(row.netAmount) : "—"
           }</td>
-          <td>${row.invoiceNumber || "—"}</td>
-          <td>${row.invoiceLineId || "—"}</td>
+          <td class="mono">${row.invoiceNumber || "—"}</td>
+          <td class="mono">${row.invoiceLineId || "—"}</td>
           <td class="num">${
             row.invoiceAmount != null
               ? StoreSelector.formatMoney(row.invoiceAmount)
@@ -224,6 +295,13 @@ const ReconcileUI = (() => {
         </tr>`
       )
       .join("");
+  }
+
+  function clearBatchSearchPanels() {
+    setBatchSearchResultsVisible(false);
+    renderOpenBatchSearchResults([], "");
+    renderOpenLineSearchResults([], "");
+    renderReconciledSearchResults([], "");
   }
 
   async function renderFilteredScope() {
@@ -243,10 +321,16 @@ const ReconcileUI = (() => {
 
     if (!filtered.query || !storeOpen) {
       batchSearchToken += 1;
-      renderReconciledSearchResults([], "");
+      clearBatchSearchPanels();
       updateBatchSearchHint(filtered, 0);
       return;
     }
+
+    // Show open matches immediately from the in-memory reconciliation scope.
+    setBatchSearchResultsVisible(true);
+    renderOpenBatchSearchResults(filtered.batches, filtered.query);
+    renderOpenLineSearchResults(filtered.lines, filtered.query);
+    renderReconciledSearchResults([], filtered.query);
 
     const token = ++batchSearchToken;
     updateBatchSearchHint(filtered, 0);
@@ -254,9 +338,23 @@ const ReconcileUI = (() => {
     try {
       const result = await window.api.searchByBatchNumber(filtered.query);
       if (token !== batchSearchToken) return;
+
+      // Prefer API open results so search stays complete even if scope is stale.
+      const openBatches = result.openBatches || filtered.batches;
+      const openLines = result.openLines || filtered.lines;
       const reconciled = result.reconciled || [];
+
+      renderOpenBatchSearchResults(openBatches, filtered.query);
+      renderOpenLineSearchResults(openLines, filtered.query);
       renderReconciledSearchResults(reconciled, filtered.query);
-      updateBatchSearchHint(filtered, reconciled.length);
+      updateBatchSearchHint(
+        {
+          query: filtered.query,
+          batches: openBatches,
+          lines: openLines,
+        },
+        reconciled.length
+      );
     } catch (err) {
       if (token !== batchSearchToken) return;
       renderReconciledSearchResults([], filtered.query);
@@ -274,7 +372,7 @@ const ReconcileUI = (() => {
     document.getElementById("batch-search-clear-btn").disabled = true;
     document.getElementById("batch-search-hint").hidden = true;
     document.getElementById("batch-search-hint").textContent = "";
-    renderReconciledSearchResults([], "");
+    clearBatchSearchPanels();
     if (render) {
       renderFilteredScope();
     }
@@ -297,12 +395,23 @@ const ReconcileUI = (() => {
       summary != null ? StoreSelector.formatMoney(summary.invoiceTotal) : "—";
     document.getElementById("reconcile-credit-gap").textContent =
       summary != null ? StoreSelector.formatMoney(summary.creditDiscrepancy) : "—";
+
+    if (typeof DashboardUI !== "undefined") {
+      DashboardUI.updateHeroDiscStyle(
+        summary != null ? summary.creditDiscrepancy : null
+      );
+    }
   }
 
   function renderCoverage(result) {
+    const coverageEl = document.getElementById("reconcile-coverage");
+    const warningEl = document.getElementById("reconcile-coverage-warning");
+
     if (!result) {
-      document.getElementById("reconcile-coverage").textContent = "";
-      document.getElementById("reconcile-coverage-warning").hidden = true;
+      coverageEl.textContent = StoreSelector.getActiveStore()
+        ? "No reconciliation preview yet — click Reconcile store."
+        : "Open a store to see reconciliation coverage.";
+      warningEl.hidden = true;
       return;
     }
 
@@ -313,17 +422,23 @@ const ReconcileUI = (() => {
     const overCreditedCount = summary.overCreditedCount || 0;
     const mismatchCount = summary.mismatchCount || 0;
     const pending = result.pendingConfirmCount || summary.matchedCount || 0;
-    const text = `Open items: ${summary.scopedBatchCount} batches, ${summary.lineCount} invoice lines across ${invoiceLabel}, ${pending} pending confirm, ${summary.missingFromInvoiceCount} missing from invoices, ${reversedCount} reversed, ${overCreditedCount} over-credited, ${mismatchCount} amount mismatches, ${summary.unmatchedLineCount} unmatched lines.`;
-    document.getElementById("reconcile-coverage").textContent = text;
+    coverageEl.innerHTML = `Open items: <b>${summary.scopedBatchCount}</b> batches, <b>${summary.lineCount}</b> invoice lines across <b>${invoiceLabel}</b> · <b>${pending}</b> pending confirm · <b>${summary.missingFromInvoiceCount}</b> missing · <b>${summary.unmatchedLineCount}</b> unmatched lines`;
 
-    const warningEl = document.getElementById("reconcile-coverage-warning");
     const showWarning =
       summary.missingFromInvoiceCount > 0 ||
       summary.unmatchedLineCount > 0 ||
       reversedCount > 0 ||
       overCreditedCount > 0 ||
       mismatchCount > 0;
-    warningEl.hidden = !showWarning;
+    warningEl.hidden = false;
+    if (showWarning) {
+      warningEl.className = "warn";
+      warningEl.textContent =
+        "Batch corpus may be incomplete — treat discrepancy as provisional";
+    } else {
+      warningEl.className = "ok";
+      warningEl.textContent = "Coverage complete — discrepancy is final";
+    }
   }
 
   function sortBatches(batches) {
@@ -356,12 +471,18 @@ const ReconcileUI = (() => {
 
     tbody.innerHTML = sortBatches(batches)
       .map(
-        (batch) => `<tr class="${batchRowStatusClass(batch.match_status)}">
-          <td>${StoreSelector.formatDate(batch.batch_date)}</td>
-          <td>${StoreSelector.stripLeadingZeros(batch.batch_number)}</td>
+        (batch) => {
+          const [pillClass, pillLabel] =
+            typeof DashboardUI !== "undefined"
+              ? DashboardUI.statusPill(batch.match_status)
+              : ["pill-unmatched", formatMatchStatus(batch.match_status)];
+          return `<tr class="${batchRowStatusClass(batch.match_status)}">
+          <td class="mono">${StoreSelector.formatDate(batch.batch_date)}</td>
+          <td class="mono">${StoreSelector.stripLeadingZeros(batch.batch_number)}</td>
           <td class="num">${StoreSelector.formatMoney(batch.net_amount)}</td>
-          <td>${formatMatchStatus(batch.match_status)}</td>
-        </tr>`
+          <td><span class="pill ${pillClass}">${pillLabel}</span></td>
+        </tr>`;
+        }
       )
       .join("");
   }
@@ -378,14 +499,20 @@ const ReconcileUI = (() => {
 
     tbody.innerHTML = sortLines(lines)
       .map(
-        (line) => `<tr class="${lineRowStatusClass(line.match_status)}">
-          <td>${line.invoice_number || ""}</td>
-          <td>${line.invoice_line_id}</td>
-          <td>${StoreSelector.stripLeadingZeros(line.batch_number)}</td>
-          <td>${StoreSelector.formatDate(line.inv_date)}</td>
+        (line) => {
+          const [pillClass, pillLabel] =
+            typeof DashboardUI !== "undefined"
+              ? DashboardUI.statusPill(line.match_status)
+              : ["pill-unmatched", formatMatchStatus(line.match_status)];
+          return `<tr class="${lineRowStatusClass(line.match_status)}">
+          <td class="mono">${line.invoice_number || ""}</td>
+          <td class="mono">${line.invoice_line_id}</td>
+          <td class="mono">${StoreSelector.stripLeadingZeros(line.batch_number)}</td>
+          <td class="mono">${StoreSelector.formatDate(line.inv_date)}</td>
           <td class="num">${StoreSelector.formatMoney(line.amount)}</td>
-          <td>${formatMatchStatus(line.match_status)}</td>
-        </tr>`
+          <td><span class="pill ${pillClass}">${pillLabel}</span></td>
+        </tr>`;
+        }
       )
       .join("");
   }
@@ -411,6 +538,9 @@ const ReconcileUI = (() => {
     if (!result) {
       renderSummary(null);
       renderCoverage(null);
+      if (typeof DashboardUI !== "undefined") {
+        DashboardUI.updateHeroFromResult(null);
+      }
       return;
     }
 
@@ -421,6 +551,9 @@ const ReconcileUI = (() => {
 
     renderSummary(result.summary, batches);
     renderCoverage(result);
+    if (typeof DashboardUI !== "undefined") {
+      DashboardUI.updateHeroFromResult(result);
+    }
   }
 
   function renderMatchedPairsTable(matched) {
@@ -477,6 +610,15 @@ const ReconcileUI = (() => {
     const list = document.getElementById("reconciled-runs-list");
     const badge = document.getElementById("reconciled-run-count-badge");
     badge.textContent = String(runs.length);
+    if (typeof DashboardUI !== "undefined") {
+      const batchCount = Number(document.getElementById("batch-count-badge")?.textContent || 0);
+      const invoiceCount = Number(document.getElementById("invoice-count-badge")?.textContent || 0);
+      DashboardUI.updateCounts({
+        batches: batchCount,
+        invoices: invoiceCount,
+        recons: runs.length,
+      });
+    }
 
     if (!runs || runs.length === 0) {
       expandedRunId = null;
@@ -487,9 +629,12 @@ const ReconcileUI = (() => {
     list.innerHTML = runs
       .map((run) => {
         const open = expandedRunId === run.id ? "open" : "";
-        return `<details class="reconciled-run" data-run-id="${run.id}" ${open}>
+        return `<details class="card reconciled-run lift" data-run-id="${run.id}" ${open}>
           <summary class="reconciled-run-summary">
-            <span class="reconciled-run-title">${StoreSelector.formatDateTime(run.run_at)}</span>
+            <div>
+              <div class="reconciled-run-title">Confirmed run</div>
+              <div class="section-hint">${StoreSelector.formatDateTime(run.run_at)}</div>
+            </div>
             <span class="badge">${run.matched_count} matched</span>
             <span class="reconciled-run-credit">${StoreSelector.formatMoney(run.total_credit)}</span>
           </summary>

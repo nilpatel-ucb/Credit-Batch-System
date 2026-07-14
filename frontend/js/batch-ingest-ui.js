@@ -302,7 +302,7 @@ const BatchIngestUI = (() => {
 
     dz.addEventListener("click", () => {
       if (!storeOpen) {
-        showStatus("Select or create a store in the left panel first.", "error");
+        showStatus("Select or create a store first (Manage).", "error");
         return;
       }
       input.click();
@@ -339,7 +339,7 @@ const BatchIngestUI = (() => {
       e.stopPropagation();
       dz.classList.remove("dragover");
       if (!storeOpen) {
-        showStatus("Select or create a store in the left panel first.", "error");
+        showStatus("Select or create a store first (Manage).", "error");
         return;
       }
       const files = pdfFilesFromDrop(e);

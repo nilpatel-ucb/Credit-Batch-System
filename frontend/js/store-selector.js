@@ -1,15 +1,12 @@
 const StoreSelector = (() => {
-  const SIDEBAR_COLLAPSED_KEY = "credit-batch.store-sidebar-collapsed";
-
   let activeStore = null;
   let activeSiteId = null;
   let onStoreChange = null;
-  let sidebarCollapsed = false;
 
   function formatMoney(value) {
     return Number(value).toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      style: "currency",
+      currency: "USD",
     });
   }
 
@@ -80,6 +77,33 @@ const StoreSelector = (() => {
       `Active: ${name}${siteLabel} (${batchCount} batches)`;
     document.getElementById("batch-count-badge").textContent = String(batchCount);
     populateEditStoreForm(name, siteId);
+    if (typeof DashboardUI !== "undefined") {
+      DashboardUI.updateBrand(name, siteId);
+    }
+  }
+
+  function renderStorePills(stores) {
+    const switchEl = document.getElementById("store-switch");
+    if (!switchEl) return;
+    switchEl.innerHTML = "";
+
+    if (!stores.length) {
+      const empty = document.createElement("span");
+      empty.className = "store-pill";
+      empty.style.cursor = "default";
+      empty.textContent = "No stores";
+      switchEl.appendChild(empty);
+      return;
+    }
+
+    for (const store of stores) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "store-pill" + (store.name === activeStore ? " active" : "");
+      btn.innerHTML = `<span class="dot"></span>${store.name}`;
+      btn.addEventListener("click", () => openStore(store.name));
+      switchEl.appendChild(btn);
+    }
   }
 
   async function refreshStoreList() {
@@ -87,10 +111,13 @@ const StoreSelector = (() => {
     const listEl = document.getElementById("store-list");
     listEl.innerHTML = "";
 
+    renderStorePills(stores);
+
     if (stores.length === 0) {
       const empty = document.createElement("p");
-      empty.className = "active-store";
-      empty.textContent = "No stores yet";
+      empty.className = "empty-hint";
+      empty.style.padding = "8px 0";
+      empty.textContent = "No stores yet — create one below.";
       listEl.appendChild(empty);
       populateEditStoreForm(null);
       return stores;
@@ -101,7 +128,9 @@ const StoreSelector = (() => {
       btn.type = "button";
       btn.className = "store-item" + (store.name === activeStore ? " active" : "");
       btn.textContent = formatStoreLabel(store);
-      btn.addEventListener("click", () => openStore(store.name));
+      btn.addEventListener("click", async () => {
+        await openStore(store.name);
+      });
       listEl.appendChild(btn);
     }
     return stores;
@@ -140,47 +169,8 @@ const StoreSelector = (() => {
     return activeSiteId;
   }
 
-  function applySidebarCollapsed(collapsed) {
-    sidebarCollapsed = collapsed;
-    const layout = document.getElementById("app-layout");
-    const openBtn = document.getElementById("store-sidebar-open-btn");
-    const closeBtn = document.getElementById("store-sidebar-close-btn");
-
-    layout.classList.toggle("store-sidebar-collapsed", collapsed);
-    openBtn.hidden = !collapsed;
-    closeBtn.setAttribute("aria-expanded", String(!collapsed));
-    openBtn.setAttribute("aria-expanded", String(!collapsed));
-
-    try {
-      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
-    } catch {
-      // Ignore storage failures (private mode, etc.)
-    }
-  }
-
-  function toggleSidebar() {
-    applySidebarCollapsed(!sidebarCollapsed);
-  }
-
-  function initSidebarToggle() {
-    const closeBtn = document.getElementById("store-sidebar-close-btn");
-    const openBtn = document.getElementById("store-sidebar-open-btn");
-
-    closeBtn.addEventListener("click", () => applySidebarCollapsed(true));
-    openBtn.addEventListener("click", () => applySidebarCollapsed(false));
-
-    let initialCollapsed = false;
-    try {
-      initialCollapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-    } catch {
-      initialCollapsed = false;
-    }
-    applySidebarCollapsed(initialCollapsed);
-  }
-
   function init(handlers) {
     onStoreChange = handlers.onStoreChange;
-    initSidebarToggle();
 
     document.getElementById("create-store-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -220,6 +210,8 @@ const StoreSelector = (() => {
     refreshStoreList().then(async (stores) => {
       if (stores.length > 0 && !activeStore) {
         await openStore(stores[0].name);
+      } else if (!stores.length && typeof DashboardUI !== "undefined") {
+        DashboardUI.updateBrand(null);
       }
     });
   }
@@ -232,8 +224,6 @@ const StoreSelector = (() => {
     setActiveStoreInfo,
     getActiveStore,
     getActiveSiteId,
-    toggleSidebar,
-    applySidebarCollapsed,
     formatMoney,
     formatDate,
     formatDateTime,
