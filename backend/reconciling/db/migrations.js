@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const CURRENT_VERSION = 4;
+const CURRENT_VERSION = 5;
 
 function getSchemaSql() {
   return fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
@@ -73,6 +73,50 @@ function migrateToV4(db) {
   setSchemaVersion(db, 4);
 }
 
+function migrateToV5(db) {
+  const batchColumns = db.prepare("PRAGMA table_info(batches)").all();
+  const lineColumns = db.prepare("PRAGMA table_info(invoice_lines)").all();
+  const runColumns = db.prepare("PRAGMA table_info(reconciliation_runs)").all();
+
+  const hasBatchRunId = batchColumns.some((column) => column.name === "reconciliation_run_id");
+  const hasLineRunId = lineColumns.some((column) => column.name === "reconciliation_run_id");
+  const hasInvoiceIdOnRuns = runColumns.some((column) => column.name === "invoice_id");
+
+  if (hasInvoiceIdOnRuns || runColumns.length === 0) {
+    db.exec(`
+      DROP TABLE IF EXISTS reconciliation_runs;
+      CREATE TABLE reconciliation_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_at TEXT NOT NULL,
+        matched_count INTEGER NOT NULL,
+        missing_from_invoice_count INTEGER NOT NULL DEFAULT 0,
+        unmatched_line_count INTEGER NOT NULL DEFAULT 0,
+        mismatch_count INTEGER NOT NULL DEFAULT 0,
+        reversed_count INTEGER NOT NULL DEFAULT 0,
+        over_credited_count INTEGER NOT NULL DEFAULT 0,
+        total_deposit REAL NOT NULL,
+        total_fee REAL NOT NULL,
+        total_credit REAL NOT NULL,
+        credit_discrepancy REAL NOT NULL DEFAULT 0
+      );
+    `);
+  }
+
+  if (!hasBatchRunId) {
+    db.exec(
+      `ALTER TABLE batches ADD COLUMN reconciliation_run_id INTEGER REFERENCES reconciliation_runs (id);`
+    );
+  }
+
+  if (!hasLineRunId) {
+    db.exec(
+      `ALTER TABLE invoice_lines ADD COLUMN reconciliation_run_id INTEGER REFERENCES reconciliation_runs (id);`
+    );
+  }
+
+  setSchemaVersion(db, 5);
+}
+
 function migrate(db) {
   let version = getSchemaVersion(db);
 
@@ -93,6 +137,11 @@ function migrate(db) {
 
   if (version < 4) {
     migrateToV4(db);
+    version = 4;
+  }
+
+  if (version < 5) {
+    migrateToV5(db);
   }
 }
 

@@ -2,6 +2,8 @@ const ReconcileUI = (() => {
   let storeOpen = false;
   let onReconcileComplete = null;
   let scopeBatches = [];
+  let pendingConfirmCount = 0;
+  let expandedRunId = null;
 
   function formatMatchStatus(status) {
     switch (status) {
@@ -23,6 +25,39 @@ const ReconcileUI = (() => {
     }
   }
 
+  function isProblemBatchStatus(status) {
+    return (
+      status === "missing_from_invoice" ||
+      status === "reversed" ||
+      status === "over_credited" ||
+      status === "mismatch" ||
+      status === "unmatched"
+    );
+  }
+
+  function isProblemLineStatus(status) {
+    return (
+      status === "unmatched" ||
+      status === "ambiguous" ||
+      status === "missing_from_invoice" ||
+      status === "reversed" ||
+      status === "over_credited" ||
+      status === "mismatch"
+    );
+  }
+
+  function batchSortRank(status) {
+    if (isProblemBatchStatus(status)) return 0;
+    if (status === "matched") return 1;
+    return 2;
+  }
+
+  function lineSortRank(status) {
+    if (isProblemLineStatus(status)) return 0;
+    if (status === "matched") return 1;
+    return 2;
+  }
+
   function batchRowStatusClass(status) {
     switch (status) {
       case "matched":
@@ -31,6 +66,7 @@ const ReconcileUI = (() => {
       case "reversed":
       case "over_credited":
       case "mismatch":
+      case "unmatched":
         return "row-reconcile-missing";
       default:
         return "";
@@ -82,9 +118,18 @@ const ReconcileUI = (() => {
     el.textContent = message;
   }
 
+  function updateConfirmButton() {
+    const btn = document.getElementById("reconcile-confirm-btn");
+    btn.disabled = !storeOpen || pendingConfirmCount <= 0;
+  }
+
   function setControlsEnabled(enabled) {
     storeOpen = enabled;
     document.getElementById("reconcile-run-btn").disabled = !enabled;
+    if (!enabled) {
+      pendingConfirmCount = 0;
+    }
+    updateConfirmButton();
   }
 
   function renderSummary(summary, batches = scopeBatches) {
@@ -119,7 +164,8 @@ const ReconcileUI = (() => {
     const reversedCount = summary.reversedCount || 0;
     const overCreditedCount = summary.overCreditedCount || 0;
     const mismatchCount = summary.mismatchCount || 0;
-    const text = `Store ledger: ${summary.scopedBatchCount} batches, ${summary.lineCount} invoice lines across ${invoiceLabel}, ${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} missing from invoices, ${reversedCount} reversed, ${overCreditedCount} over-credited, ${mismatchCount} amount mismatches, ${summary.unmatchedLineCount} unmatched lines.`;
+    const pending = result.pendingConfirmCount || summary.matchedCount || 0;
+    const text = `Open items: ${summary.scopedBatchCount} batches, ${summary.lineCount} invoice lines across ${invoiceLabel}, ${pending} pending confirm, ${summary.missingFromInvoiceCount} missing from invoices, ${reversedCount} reversed, ${overCreditedCount} over-credited, ${mismatchCount} amount mismatches, ${summary.unmatchedLineCount} unmatched lines.`;
     document.getElementById("reconcile-coverage").textContent = text;
 
     const warningEl = document.getElementById("reconcile-coverage-warning");
@@ -132,17 +178,35 @@ const ReconcileUI = (() => {
     warningEl.hidden = !showWarning;
   }
 
+  function sortBatches(batches) {
+    return [...batches].sort((a, b) => {
+      const rankDiff = batchSortRank(a.match_status) - batchSortRank(b.match_status);
+      if (rankDiff !== 0) return rankDiff;
+      if (a.batch_date !== b.batch_date) return a.batch_date < b.batch_date ? -1 : 1;
+      return String(a.batch_number).localeCompare(String(b.batch_number));
+    });
+  }
+
+  function sortLines(lines) {
+    return [...lines].sort((a, b) => {
+      const rankDiff = lineSortRank(a.match_status) - lineSortRank(b.match_status);
+      if (rankDiff !== 0) return rankDiff;
+      if (a.inv_date !== b.inv_date) return a.inv_date < b.inv_date ? -1 : 1;
+      return String(a.invoice_line_id).localeCompare(String(b.invoice_line_id));
+    });
+  }
+
   function renderBatchesTable(batches) {
     const tbody = document.querySelector("#reconcile-batches-table tbody");
     document.getElementById("reconcile-batch-count").textContent = String(batches.length);
 
     if (!batches || batches.length === 0) {
       tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="4">No batches in this store yet</td></tr>';
+        '<tr class="empty-row"><td colspan="4">No open batches to reconcile</td></tr>';
       return;
     }
 
-    tbody.innerHTML = batches
+    tbody.innerHTML = sortBatches(batches)
       .map(
         (batch) => `<tr class="${batchRowStatusClass(batch.match_status)}">
           <td>${StoreSelector.formatDate(batch.batch_date)}</td>
@@ -160,11 +224,11 @@ const ReconcileUI = (() => {
 
     if (!lines || lines.length === 0) {
       tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="6">No invoice lines in this store yet</td></tr>';
+        '<tr class="empty-row"><td colspan="6">No open invoice lines to reconcile</td></tr>';
       return;
     }
 
-    tbody.innerHTML = lines
+    tbody.innerHTML = sortLines(lines)
       .map(
         (line) => `<tr class="${lineRowStatusClass(line.match_status)}">
           <td>${line.invoice_number || ""}</td>
@@ -181,14 +245,18 @@ const ReconcileUI = (() => {
   function renderScope(scope) {
     if (!scope) {
       scopeBatches = [];
+      pendingConfirmCount = 0;
       renderBatchesTable([]);
       renderLinesTable([]);
+      updateConfirmButton();
       return;
     }
 
     scopeBatches = scope.batches;
+    pendingConfirmCount = Number(scope.pendingConfirmCount || 0);
     renderBatchesTable(scope.batches);
     renderLinesTable(scope.lines);
+    updateConfirmButton();
   }
 
   function render(result, batches = scopeBatches) {
@@ -198,17 +266,133 @@ const ReconcileUI = (() => {
       return;
     }
 
+    if (result.pendingConfirmCount != null) {
+      pendingConfirmCount = Number(result.pendingConfirmCount);
+      updateConfirmButton();
+    }
+
     renderSummary(result.summary, batches);
     renderCoverage(result);
+  }
+
+  function renderMatchedPairsTable(matched) {
+    if (!matched || matched.length === 0) {
+      return '<p class="empty-hint">No matched pairs in this run</p>';
+    }
+
+    const rows = matched
+      .map(
+        (row) => `<tr class="row-reconcile-matched">
+          <td>${StoreSelector.formatDate(row.batchDate)}</td>
+          <td>${StoreSelector.stripLeadingZeros(row.batchNumber)}</td>
+          <td class="num">${StoreSelector.formatMoney(row.netAmount)}</td>
+          <td>${row.invoiceNumber || "—"}</td>
+          <td>${row.invoiceLineId || "—"}</td>
+          <td class="num">${
+            row.invoiceAmount != null ? StoreSelector.formatMoney(row.invoiceAmount) : "—"
+          }</td>
+        </tr>`
+      )
+      .join("");
+
+    return `<div class="table-wrap">
+      <table class="reconciled-run-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Batch #</th>
+            <th>Net Amount</th>
+            <th>Invoice #</th>
+            <th>Invoice Line ID</th>
+            <th>Invoice Amount</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+  }
+
+  async function loadRunDetail(runId) {
+    const detailEl = document.getElementById(`reconciled-run-detail-${runId}`);
+    if (!detailEl) return;
+
+    detailEl.innerHTML = '<p class="empty-hint">Loading…</p>';
+    try {
+      const run = await window.api.getReconciliationRun(runId);
+      detailEl.innerHTML = renderMatchedPairsTable(run.matched);
+    } catch (err) {
+      detailEl.innerHTML = `<p class="empty-hint">${err.message || "Failed to load run."}</p>`;
+    }
+  }
+
+  function renderReconciledRuns(runs) {
+    const list = document.getElementById("reconciled-runs-list");
+    const badge = document.getElementById("reconciled-run-count-badge");
+    badge.textContent = String(runs.length);
+
+    if (!runs || runs.length === 0) {
+      expandedRunId = null;
+      list.innerHTML = '<p class="empty-hint">No confirmed reconciliations yet</p>';
+      return;
+    }
+
+    list.innerHTML = runs
+      .map((run) => {
+        const open = expandedRunId === run.id ? "open" : "";
+        return `<details class="reconciled-run" data-run-id="${run.id}" ${open}>
+          <summary class="reconciled-run-summary">
+            <span class="reconciled-run-title">${StoreSelector.formatDateTime(run.run_at)}</span>
+            <span class="badge">${run.matched_count} matched</span>
+            <span class="reconciled-run-credit">${StoreSelector.formatMoney(run.total_credit)}</span>
+          </summary>
+          <div class="reconciled-run-detail" id="reconciled-run-detail-${run.id}">
+            <p class="empty-hint">Expand to load matched pairs</p>
+          </div>
+        </details>`;
+      })
+      .join("");
+
+    list.querySelectorAll("details.reconciled-run").forEach((details) => {
+      details.addEventListener("toggle", async () => {
+        const runId = Number(details.dataset.runId);
+        if (details.open) {
+          expandedRunId = runId;
+          await loadRunDetail(runId);
+        } else if (expandedRunId === runId) {
+          expandedRunId = null;
+        }
+      });
+    });
+
+    if (expandedRunId) {
+      const openDetails = list.querySelector(`details[data-run-id="${expandedRunId}"]`);
+      if (openDetails && openDetails.open) {
+        loadRunDetail(expandedRunId);
+      }
+    }
+  }
+
+  async function loadReconciledRuns() {
+    if (!storeOpen) {
+      renderReconciledRuns([]);
+      return [];
+    }
+
+    const runs = await window.api.listReconciliationRuns();
+    renderReconciledRuns(runs);
+    return runs;
   }
 
   function resetView() {
     setControlsEnabled(false);
     scopeBatches = [];
+    pendingConfirmCount = 0;
+    expandedRunId = null;
     renderSummary(null);
     renderCoverage(null);
     renderBatchesTable([]);
     renderLinesTable([]);
+    renderReconciledRuns([]);
     setStatus("");
   }
 
@@ -217,22 +401,36 @@ const ReconcileUI = (() => {
       renderScope(null);
       renderSummary(null);
       renderCoverage(null);
+      renderReconciledRuns([]);
       return null;
     }
 
     const scope = await window.api.getReconciliationScope();
     renderScope(scope);
+    await loadReconciledRuns();
 
     const lastResult = await window.api.getLastReconciliation();
     if (lastResult) {
       render(lastResult, scope?.batches);
       const runAt = lastResult.runAt ? StoreSelector.formatDateTime(lastResult.runAt) : "";
-      setStatus(runAt ? `Last reconciled ${runAt}.` : "", "info");
+      if (pendingConfirmCount > 0) {
+        setStatus(
+          `${pendingConfirmCount} matched pair${pendingConfirmCount === 1 ? "" : "s"} ready to confirm.${runAt ? ` Last preview ${runAt}.` : ""}`,
+          "info"
+        );
+      } else {
+        setStatus(
+          runAt
+            ? `Open problems remain. Last preview ${runAt}.`
+            : "Open problems remain.",
+          "info"
+        );
+      }
     } else if (scope && (scope.batches.length > 0 || scope.lines.length > 0)) {
       renderSummary(null);
       renderCoverage(null);
       setStatus(
-        "This store has not been reconciled yet. Click Reconcile store to match all batches and invoice lines.",
+        "This store has not been reconciled yet. Click Reconcile store to preview matches.",
         "info"
       );
     } else {
@@ -266,7 +464,7 @@ const ReconcileUI = (() => {
         (summary.mismatchCount || 0) +
         summary.unmatchedLineCount;
       setStatus(
-        `Reconciled store: ${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} missing from invoices, ${summary.reversedCount || 0} reversed, ${summary.overCreditedCount || 0} over-credited, ${summary.mismatchCount || 0} amount mismatches, ${summary.unmatchedLineCount} unmatched lines, ${StoreSelector.formatMoney(missingCreditValue(summary))} missing credit.`,
+        `Preview: ${summary.matchedCount} matched, ${summary.missingFromInvoiceCount} missing from invoices, ${summary.reversedCount || 0} reversed, ${summary.overCreditedCount || 0} over-credited, ${summary.mismatchCount || 0} amount mismatches, ${summary.unmatchedLineCount} unmatched lines, ${StoreSelector.formatMoney(missingCreditValue(summary))} missing credit.${summary.matchedCount > 0 ? " Click Confirm matches to archive matched pairs." : ""}`,
         issueCount > 0 ? "info" : "success"
       );
 
@@ -279,6 +477,36 @@ const ReconcileUI = (() => {
       return null;
     } finally {
       button.disabled = !storeOpen;
+      updateConfirmButton();
+    }
+  }
+
+  async function confirmReconciliation() {
+    if (!storeOpen) {
+      setStatus("Open a store to confirm.", "error");
+      return null;
+    }
+
+    const button = document.getElementById("reconcile-confirm-btn");
+    button.disabled = true;
+    setStatus("Confirming matched pairs…", "info");
+
+    try {
+      const run = await window.api.confirmReconciliation();
+      await loadScope();
+      setStatus(
+        `Confirmed ${run.matchedCount} matched pair${run.matchedCount === 1 ? "" : "s"} into Reconciled (${StoreSelector.formatDateTime(run.runAt)}).`,
+        "success"
+      );
+
+      if (onReconcileComplete) {
+        await onReconcileComplete(run);
+      }
+      return run;
+    } catch (err) {
+      setStatus(err.message || "Confirm failed.", "error");
+      updateConfirmButton();
+      return null;
     }
   }
 
@@ -292,6 +520,10 @@ const ReconcileUI = (() => {
 
     document.getElementById("reconcile-run-btn").addEventListener("click", async () => {
       await runReconciliation();
+    });
+
+    document.getElementById("reconcile-confirm-btn").addEventListener("click", async () => {
+      await confirmReconciliation();
     });
 
     resetView();
@@ -308,6 +540,7 @@ const ReconcileUI = (() => {
     resetView,
     onStoreOpen,
     runReconciliation,
+    confirmReconciliation,
     render,
     refresh,
   };

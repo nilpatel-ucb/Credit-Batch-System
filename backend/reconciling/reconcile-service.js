@@ -8,6 +8,10 @@ function groupBatches(group) {
   return group.batches && group.batches.length > 0 ? group.batches : [group.batch];
 }
 
+function isOpenRow(row) {
+  return row.reconciliation_run_id == null;
+}
+
 function buildExceptions(result) {
   const exceptions = [];
 
@@ -133,7 +137,8 @@ function resetStoreReconciliationState(database) {
   database
     .prepare(
       `UPDATE invoice_lines
-       SET match_status = 'unmatched', batch_id = NULL`
+       SET match_status = 'unmatched', batch_id = NULL
+       WHERE reconciliation_run_id IS NULL`
     )
     .run();
 
@@ -143,7 +148,8 @@ function resetStoreReconciliationState(database) {
        SET match_status = 'unmatched',
            invoice_line_id = NULL,
            invoice_amount = NULL,
-           last_reconciled_at = NULL`
+           last_reconciled_at = NULL
+       WHERE reconciliation_run_id IS NULL`
     )
     .run();
 }
@@ -155,14 +161,14 @@ function applyReconciliation(database, result, runAt) {
          invoice_line_id = @invoice_line_id,
          invoice_amount = @invoice_amount,
          last_reconciled_at = @last_reconciled_at
-     WHERE id = @id`
+     WHERE id = @id AND reconciliation_run_id IS NULL`
   );
 
   const updateLine = database.prepare(
     `UPDATE invoice_lines
      SET match_status = @match_status,
          batch_id = @batch_id
-     WHERE id = @id`
+     WHERE id = @id AND reconciliation_run_id IS NULL`
   );
 
   const run = database.transaction(() => {
@@ -225,8 +231,10 @@ function applyReconciliation(database, result, runAt) {
 }
 
 function runStoreReconciliation(database, loaders) {
-  const batches = loaders.getBatches();
-  const lines = loaders.getAllInvoiceLines();
+  const allBatches = loaders.getBatches();
+  const allLines = loaders.getAllInvoiceLines();
+  const openBatches = allBatches.filter(isOpenRow);
+  const openLines = allLines.filter(isOpenRow);
   const invoices = loaders.getInvoices();
   const invoiceTotal = invoices.reduce((sum, invoice) => sum + Number(invoice.invoice_total), 0);
   const runAt = new Date().toISOString();
@@ -235,9 +243,9 @@ function runStoreReconciliation(database, loaders) {
 
   const result = reconcile({
     invoiceTotal,
-    lines,
-    scopedBatches: batches,
-    matchableBatches: batches,
+    lines: openLines,
+    scopedBatches: openBatches,
+    matchableBatches: openBatches,
   });
 
   applyReconciliation(database, result, runAt);
@@ -251,4 +259,6 @@ module.exports = {
   applyReconciliation,
   buildExceptions,
   buildMatchedRows,
+  isOpenRow,
+  round2,
 };

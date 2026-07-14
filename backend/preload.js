@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld("api", {
   reconcileStore: () => ipcRenderer.invoke("reconcile:run"),
   getLastReconciliation: () => ipcRenderer.invoke("reconcile:last"),
   getReconciliationScope: () => ipcRenderer.invoke("reconcile:scope"),
+  confirmReconciliation: () => ipcRenderer.invoke("reconcile:confirm"),
+  listReconciliationRuns: () => ipcRenderer.invoke("reconcile:runs"),
+  getReconciliationRun: (runId) => ipcRenderer.invoke("reconcile:runDetail", runId),
   parseChevronPdf: (buffer) => {
     const bytes =
       buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;

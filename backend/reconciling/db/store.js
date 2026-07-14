@@ -237,11 +237,28 @@ function createStoreManager(storesDir) {
       .prepare(
         `SELECT id, site_id, batch_date, batch_number, gross_amount, total_fee,
                 net_amount, source_pdf, ingested_at, match_status,
-                invoice_line_id, invoice_amount, last_reconciled_at
+                invoice_line_id, invoice_amount, last_reconciled_at, reconciliation_run_id
          FROM batches
          ORDER BY batch_date, batch_number`
       )
       .all();
+  }
+
+  function getOpenBatches() {
+    return getBatches().filter((batch) => batch.reconciliation_run_id == null);
+  }
+
+  function pruneEmptyReconciliationRuns(database) {
+    database
+      .prepare(
+        `DELETE FROM reconciliation_runs
+         WHERE id NOT IN (
+           SELECT reconciliation_run_id FROM batches WHERE reconciliation_run_id IS NOT NULL
+           UNION
+           SELECT reconciliation_run_id FROM invoice_lines WHERE reconciliation_run_id IS NOT NULL
+         )`
+      )
+      .run();
   }
 
   function deleteBatchesByIds(database, ids) {
@@ -261,7 +278,7 @@ function createStoreManager(storesDir) {
     database
       .prepare(
         `UPDATE invoice_lines
-         SET match_status = 'unmatched', batch_id = NULL
+         SET match_status = 'unmatched', batch_id = NULL, reconciliation_run_id = NULL
          WHERE batch_id IN (${placeholders})`
       )
       .run(...ids);
@@ -269,6 +286,8 @@ function createStoreManager(storesDir) {
     const result = database
       .prepare(`DELETE FROM batches WHERE id IN (${placeholders})`)
       .run(...ids);
+
+    pruneEmptyReconciliationRuns(database);
 
     return {
       deletedCount: result.changes,
@@ -627,9 +646,9 @@ function createStoreManager(storesDir) {
       .get(id).c;
 
     const run = database.transaction(() => {
-      database.prepare(`DELETE FROM reconciliation_runs WHERE invoice_id = ?`).run(id);
       database.prepare(`DELETE FROM invoice_lines WHERE invoice_id = ?`).run(id);
       database.prepare(`DELETE FROM invoices WHERE id = ?`).run(id);
+      pruneEmptyReconciliationRuns(database);
     });
 
     run();
@@ -662,7 +681,8 @@ function createStoreManager(storesDir) {
     return requireDb()
       .prepare(
         `SELECT id, site_id, batch_date, batch_number, gross_amount, total_fee, net_amount,
-                match_status, invoice_line_id, invoice_amount, last_reconciled_at
+                match_status, invoice_line_id, invoice_amount, last_reconciled_at,
+                reconciliation_run_id
          FROM batches
          WHERE batch_date >= ? AND batch_date <= ?
          ORDER BY batch_date, batch_number, id`
@@ -674,12 +694,16 @@ function createStoreManager(storesDir) {
     return requireDb()
       .prepare(
         `SELECT l.id, l.invoice_id, l.invoice_line_id, l.batch_number, l.amount, l.inv_date,
-                l.match_status, l.batch_id, i.invoice_number
+                l.match_status, l.batch_id, l.reconciliation_run_id, i.invoice_number
          FROM invoice_lines l
          JOIN invoices i ON i.id = l.invoice_id
          ORDER BY l.inv_date, l.invoice_line_id`
       )
       .all();
+  }
+
+  function getOpenInvoiceLines() {
+    return getAllInvoiceLines().filter((line) => line.reconciliation_run_id == null);
   }
 
   function reconcileStore() {
@@ -691,11 +715,7 @@ function createStoreManager(storesDir) {
     });
   }
 
-  function getStoreReconciliation() {
-    const batches = getBatches();
-    const lines = getAllInvoiceLines();
-    const invoices = getInvoices();
-
+  function buildWorkingReconciliation(batches, lines, invoices) {
     if (batches.length === 0 && lines.length === 0) {
       return null;
     }
@@ -811,6 +831,7 @@ function createStoreManager(storesDir) {
     return {
       runAt,
       invoiceCount: invoices.length,
+      pendingConfirmCount: matchedCount,
       summary: {
         scopedBatchCount: batches.length,
         lineCount: lines.length,
@@ -833,15 +854,177 @@ function createStoreManager(storesDir) {
     };
   }
 
+  function getStoreReconciliation() {
+    return buildWorkingReconciliation(getOpenBatches(), getOpenInvoiceLines(), getInvoices());
+  }
+
+  function confirmReconciliation() {
+    const database = requireDb();
+    const openBatches = getOpenBatches();
+    const openLines = getOpenInvoiceLines();
+    const matchedBatches = openBatches.filter((batch) => batch.match_status === "matched");
+    const matchedLines = openLines.filter((line) => line.match_status === "matched");
+
+    if (matchedBatches.length === 0) {
+      throw new Error("No matched pairs to confirm. Run Reconcile store first.");
+    }
+
+    const working = buildWorkingReconciliation(openBatches, openLines, getInvoices());
+    const summary = working.summary;
+    const runAt = new Date().toISOString();
+
+    const insertRun = database.prepare(
+      `INSERT INTO reconciliation_runs (
+         run_at, matched_count, missing_from_invoice_count, unmatched_line_count,
+         mismatch_count, reversed_count, over_credited_count,
+         total_deposit, total_fee, total_credit, credit_discrepancy
+       ) VALUES (
+         @run_at, @matched_count, @missing_from_invoice_count, @unmatched_line_count,
+         @mismatch_count, @reversed_count, @over_credited_count,
+         @total_deposit, @total_fee, @total_credit, @credit_discrepancy
+       )`
+    );
+
+    const updateBatch = database.prepare(
+      `UPDATE batches SET reconciliation_run_id = ? WHERE id = ? AND reconciliation_run_id IS NULL`
+    );
+    const updateLine = database.prepare(
+      `UPDATE invoice_lines SET reconciliation_run_id = ? WHERE id = ? AND reconciliation_run_id IS NULL`
+    );
+
+    const run = database.transaction(() => {
+      const result = insertRun.run({
+        run_at: runAt,
+        matched_count: matchedBatches.length,
+        missing_from_invoice_count: summary.missingFromInvoiceCount,
+        unmatched_line_count: summary.unmatchedLineCount,
+        mismatch_count: summary.mismatchCount,
+        reversed_count: summary.reversedCount,
+        over_credited_count: summary.overCreditedCount,
+        total_deposit: summary.totalDeposit,
+        total_fee: summary.totalFee,
+        total_credit: summary.totalCredit,
+        credit_discrepancy: summary.creditDiscrepancy,
+      });
+
+      const runId = Number(result.lastInsertRowid);
+      for (const batch of matchedBatches) {
+        updateBatch.run(runId, batch.id);
+      }
+      for (const line of matchedLines) {
+        updateLine.run(runId, line.id);
+      }
+      return runId;
+    });
+
+    const runId = run();
+    return getReconciliationRun(runId);
+  }
+
+  function listReconciliationRuns() {
+    return requireDb()
+      .prepare(
+        `SELECT id, run_at, matched_count, missing_from_invoice_count, unmatched_line_count,
+                mismatch_count, reversed_count, over_credited_count,
+                total_deposit, total_fee, total_credit, credit_discrepancy
+         FROM reconciliation_runs
+         ORDER BY run_at DESC, id DESC`
+      )
+      .all();
+  }
+
+  function getReconciliationRun(runId) {
+    const database = requireDb();
+    const id = Number(runId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error("A valid reconciliation run ID is required.");
+    }
+
+    const run = database
+      .prepare(
+        `SELECT id, run_at, matched_count, missing_from_invoice_count, unmatched_line_count,
+                mismatch_count, reversed_count, over_credited_count,
+                total_deposit, total_fee, total_credit, credit_discrepancy
+         FROM reconciliation_runs
+         WHERE id = ?`
+      )
+      .get(id);
+
+    if (!run) {
+      throw new Error("Reconciliation run not found.");
+    }
+
+    const batches = database
+      .prepare(
+        `SELECT id, batch_date, batch_number, gross_amount, total_fee, net_amount,
+                invoice_line_id, invoice_amount, match_status
+         FROM batches
+         WHERE reconciliation_run_id = ?
+         ORDER BY batch_date, batch_number, id`
+      )
+      .all(id);
+
+    const lines = database
+      .prepare(
+        `SELECT l.id, l.invoice_line_id, l.batch_number, l.amount, l.inv_date,
+                l.batch_id, i.invoice_number
+         FROM invoice_lines l
+         JOIN invoices i ON i.id = l.invoice_id
+         WHERE l.reconciliation_run_id = ?
+         ORDER BY l.inv_date, l.invoice_line_id`
+      )
+      .all(id);
+
+    const matched = batches.map((batch) => {
+      const linkedLines = lines.filter((line) => line.batch_id === batch.id);
+      const primaryLine = linkedLines.find((line) => Number(line.amount) < 0) || linkedLines[0];
+      return {
+        batchId: batch.id,
+        batchDate: batch.batch_date,
+        batchNumber: batch.batch_number,
+        grossAmount: batch.gross_amount,
+        totalFee: batch.total_fee,
+        netAmount: batch.net_amount,
+        invoiceLineId:
+          linkedLines.map((line) => line.invoice_line_id).join(", ") || batch.invoice_line_id,
+        invoiceNumber: primaryLine ? primaryLine.invoice_number : null,
+        invoiceAmount: batch.invoice_amount != null ? Number(batch.invoice_amount) : null,
+        lineCount: linkedLines.length,
+        invDate: primaryLine ? primaryLine.inv_date : null,
+      };
+    });
+
+    return {
+      id: run.id,
+      runAt: run.run_at,
+      matchedCount: run.matched_count,
+      summary: {
+        matchedCount: run.matched_count,
+        missingFromInvoiceCount: run.missing_from_invoice_count,
+        unmatchedLineCount: run.unmatched_line_count,
+        mismatchCount: run.mismatch_count,
+        reversedCount: run.reversed_count,
+        overCreditedCount: run.over_credited_count,
+        totalDeposit: run.total_deposit,
+        totalFee: run.total_fee,
+        totalCredit: run.total_credit,
+        creditDiscrepancy: run.credit_discrepancy,
+      },
+      matched,
+    };
+  }
+
   function getReconciliationScope() {
-    const batches = getBatches();
-    const lines = getAllInvoiceLines();
+    const batches = getOpenBatches();
+    const lines = getOpenInvoiceLines();
     const invoices = getInvoices();
+    const pendingConfirmCount = batches.filter((batch) => batch.match_status === "matched").length;
 
     return {
       batches,
       lines,
       invoiceCount: invoices.length,
+      pendingConfirmCount,
     };
   }
 
@@ -867,6 +1050,9 @@ function createStoreManager(storesDir) {
     getReconciliationScope,
     reconcileStore,
     getStoreReconciliation,
+    confirmReconciliation,
+    listReconciliationRuns,
+    getReconciliationRun,
     getCurrentStoreName: () => currentStoreName,
     normalizeSiteId,
   };

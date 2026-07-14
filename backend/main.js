@@ -83,6 +83,14 @@ function registerIpcHandlers() {
   ipcMain.handle("reconcile:last", () => storeManager.getStoreReconciliation());
 
   ipcMain.handle("reconcile:scope", () => storeManager.getReconciliationScope());
+
+  ipcMain.handle("reconcile:confirm", () => storeManager.confirmReconciliation());
+
+  ipcMain.handle("reconcile:runs", () => storeManager.listReconciliationRuns());
+
+  ipcMain.handle("reconcile:runDetail", (_event, runId) =>
+    storeManager.getReconciliationRun(runId)
+  );
 //if parsing is empty throw an error
   ipcMain.handle("parse:chevron", async (_event, buffer) => {
     const { parseChevronPdf } = require("./parsing/chevron-pipeline");

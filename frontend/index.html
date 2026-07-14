@@ -225,11 +225,12 @@
         <section id="reconciliation-section" class="reconciliation-section">
           <div class="section-header">
             <h2>Reconciliation</h2>
-            <p class="section-hint">Match all batches against all invoice lines — green is matched, red is missing or unmatched</p>
+            <p class="section-hint">Reconcile to preview matches, then Confirm to archive matched pairs. Unmatched stay here in red.</p>
           </div>
 
           <div class="reconcile-controls">
             <button type="button" id="reconcile-run-btn" class="primary" disabled>Reconcile store</button>
+            <button type="button" id="reconcile-confirm-btn" disabled>Confirm matches</button>
           </div>
 
           <div id="reconcile-status" class="status-message" hidden></div>
@@ -268,7 +269,7 @@
 
           <div class="reconcile-comparison-grid">
             <div class="reconcile-comparison-panel">
-              <h4 class="reconcile-subheading">All batches <span id="reconcile-batch-count" class="badge">0</span></h4>
+              <h4 class="reconcile-subheading">Open batches <span id="reconcile-batch-count" class="badge">0</span></h4>
               <div class="table-wrap">
                 <table id="reconcile-batches-table">
                   <thead>
@@ -289,7 +290,7 @@
             </div>
 
             <div class="reconcile-comparison-panel">
-              <h4 class="reconcile-subheading">All invoice lines <span id="reconcile-line-count" class="badge">0</span></h4>
+              <h4 class="reconcile-subheading">Open invoice lines <span id="reconcile-line-count" class="badge">0</span></h4>
               <div class="table-wrap">
                 <table id="reconcile-lines-table">
                   <thead>
@@ -311,6 +312,20 @@
               </div>
             </div>
           </div>
+        </section>
+
+        <section class="reconciled-section collapsible-section">
+          <details class="section-disclosure">
+            <summary class="section-header">
+              <h2>Reconciled <span id="reconciled-run-count-badge" class="badge">0</span></h2>
+              <p class="section-hint">Confirmed match runs — expand a run to see its matched pairs</p>
+            </summary>
+            <div class="section-disclosure-body">
+              <div id="reconciled-runs-list" class="reconciled-runs-list">
+                <p class="empty-hint">No confirmed reconciliations yet</p>
+              </div>
+            </div>
+          </details>
         </section>
       </main>
     </div>

@@ -472,6 +472,71 @@ th {
   margin-bottom: 0.75rem;
 }
 
+.reconciled-runs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.reconciled-runs-list .empty-hint,
+.reconciled-run-detail .empty-hint {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
+.reconciled-run {
+  border: 1px solid #dde3ea;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.reconciled-run-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.65rem 0.85rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.reconciled-run-summary::-webkit-details-marker {
+  display: none;
+}
+
+.reconciled-run-summary::before {
+  content: "▸";
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.reconciled-run[open] > .reconciled-run-summary::before {
+  content: "▾";
+}
+
+.reconciled-run-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.reconciled-run-credit {
+  margin-left: auto;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.reconciled-run-detail {
+  padding: 0 0.85rem 0.85rem;
+  border-top: 1px solid #eef2f6;
+}
+
+.reconciled-run-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
 .reconcile-invoice-picker {
   display: flex;
   flex-direction: column;
