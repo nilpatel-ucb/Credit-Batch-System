@@ -794,6 +794,57 @@ th.num,
   flex-wrap: wrap;
 }
 
+.manual-batch-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.manual-batch-form .form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.manual-batch-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.manual-batch-form .form-field input {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  background: #f7fafd;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 9px 12px;
+}
+
+.manual-batch-form .form-field input:focus {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.manual-batch-form .form-field input[readonly] {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.manual-batch-form .status-message {
+  margin-top: 0;
+}
+
+.manual-batch-form .preview-actions {
+  margin-top: 0;
+}
+
 .status-message {
   margin-top: 14px;
   padding: 12px 14px;

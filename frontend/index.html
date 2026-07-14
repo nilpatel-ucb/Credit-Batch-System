@@ -302,6 +302,7 @@
               <p class="section-hint">Reconcile to preview matches, then Confirm to archive matched pairs.</p>
             </div>
             <div class="reconcile-controls">
+              <button type="button" id="manual-batch-btn" class="btn-ghost" disabled>Add batch</button>
               <button type="button" id="reconcile-run-btn" class="primary" disabled>Reconcile store</button>
               <button type="button" id="reconcile-confirm-btn" class="btn-ghost" disabled>Confirm matches</button>
             </div>
@@ -430,6 +431,55 @@
           </form>
           <p id="edit-store-status" class="edit-store-status" hidden></p>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual credit batch modal -->
+  <div class="modal" id="manual-batch-modal" hidden>
+    <div class="modal-backdrop" data-close-modal="manual-batch-modal"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="manual-batch-title">
+      <div class="modal-head">
+        <h2 id="manual-batch-title">Add credit batch</h2>
+        <button type="button" class="btn-ghost btn-compact" data-close-modal="manual-batch-modal" aria-label="Close">Close</button>
+      </div>
+      <div class="modal-body">
+        <p class="section-hint">Enter a batch that isn’t on a Chevron PDF. Site ID is taken from the active store.</p>
+        <form id="manual-batch-form" class="manual-batch-form">
+          <label class="form-field">
+            <span>Site ID</span>
+            <input type="text" id="manual-batch-site-id" readonly tabindex="-1">
+          </label>
+          <div class="form-row">
+            <label class="form-field">
+              <span>Batch date</span>
+              <input type="date" id="manual-batch-date" required>
+            </label>
+            <label class="form-field">
+              <span>Batch #</span>
+              <input type="text" id="manual-batch-number" required placeholder="e.g. 0341" autocomplete="off">
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="form-field">
+              <span>Gross (credit)</span>
+              <input type="number" id="manual-batch-gross" required step="0.01" inputmode="decimal" placeholder="0.00">
+            </label>
+            <label class="form-field">
+              <span>Total fee</span>
+              <input type="number" id="manual-batch-fee" required step="0.01" inputmode="decimal" placeholder="0.00" value="0">
+            </label>
+            <label class="form-field">
+              <span>Net amount</span>
+              <input type="number" id="manual-batch-net" required step="0.01" inputmode="decimal" placeholder="0.00">
+            </label>
+          </div>
+          <div id="manual-batch-status" class="status-message" hidden></div>
+          <div class="preview-actions">
+            <button type="submit" id="manual-batch-submit-btn" class="primary">Save batch</button>
+            <button type="button" class="btn-ghost" data-close-modal="manual-batch-modal">Cancel</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

@@ -1,12 +1,14 @@
 const ReconcileUI = (() => {
   let storeOpen = false;
   let onReconcileComplete = null;
+  let onManualBatchAdded = null;
   let scopeBatches = [];
   let scopeLines = [];
   let batchSearchQuery = "";
   let batchSearchToken = 0;
   let pendingConfirmCount = 0;
   let expandedRunId = null;
+  let netTouched = false;
 
   function formatMatchStatus(status) {
     switch (status) {
@@ -128,6 +130,7 @@ const ReconcileUI = (() => {
 
   function setControlsEnabled(enabled) {
     storeOpen = enabled;
+    document.getElementById("manual-batch-btn").disabled = !enabled;
     document.getElementById("reconcile-run-btn").disabled = !enabled;
     document.getElementById("batch-search-input").disabled = !enabled;
     document.getElementById("batch-search-clear-btn").disabled =
@@ -135,8 +138,151 @@ const ReconcileUI = (() => {
     if (!enabled) {
       pendingConfirmCount = 0;
       clearBatchSearch({ render: false });
+      closeManualBatchModal();
     }
     updateConfirmButton();
+  }
+
+  function setManualBatchStatus(message, type = "info") {
+    const el = document.getElementById("manual-batch-status");
+    if (!el) return;
+    if (!message) {
+      el.hidden = true;
+      el.textContent = "";
+      return;
+    }
+    el.hidden = false;
+    el.className = `status-message ${type}`;
+    el.textContent = message;
+  }
+
+  function parseAmountInput(value) {
+    if (value === "" || value == null) return null;
+    const amount = Number(value);
+    return Number.isFinite(amount) ? amount : null;
+  }
+
+  function roundMoney(value) {
+    return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+  }
+
+  function syncManualBatchNet() {
+    if (netTouched) return;
+    const gross = parseAmountInput(document.getElementById("manual-batch-gross").value);
+    const fee = parseAmountInput(document.getElementById("manual-batch-fee").value);
+    if (gross == null || fee == null) return;
+    document.getElementById("manual-batch-net").value = roundMoney(gross - fee).toFixed(2);
+  }
+
+  function resetManualBatchForm() {
+    const form = document.getElementById("manual-batch-form");
+    if (!form) return;
+    form.reset();
+    netTouched = false;
+    document.getElementById("manual-batch-fee").value = "0";
+    document.getElementById("manual-batch-site-id").value =
+      StoreSelector.getActiveSiteId() || "";
+    setManualBatchStatus("");
+  }
+
+  function openManualBatchModal() {
+    if (!storeOpen) {
+      setStatus("Open a store to add a batch.", "error");
+      return;
+    }
+    const siteId = StoreSelector.getActiveSiteId();
+    if (!siteId) {
+      setStatus("This store has no linked site ID.", "error");
+      return;
+    }
+    resetManualBatchForm();
+    DashboardUI.openModal("manual-batch-modal");
+    document.getElementById("manual-batch-date").focus();
+  }
+
+  function closeManualBatchModal() {
+    const modal = document.getElementById("manual-batch-modal");
+    if (!modal || modal.hidden) return;
+    DashboardUI.closeModal("manual-batch-modal");
+    setManualBatchStatus("");
+  }
+
+  async function submitManualBatch(event) {
+    event.preventDefault();
+    if (!storeOpen) {
+      setManualBatchStatus("Open a store to add a batch.", "error");
+      return;
+    }
+
+    const siteId = StoreSelector.getActiveSiteId();
+    if (!siteId) {
+      setManualBatchStatus("This store has no linked site ID.", "error");
+      return;
+    }
+
+    const batchDate = document.getElementById("manual-batch-date").value;
+    const batchNumber = String(document.getElementById("manual-batch-number").value || "").trim();
+    const gross = parseAmountInput(document.getElementById("manual-batch-gross").value);
+    const fee = parseAmountInput(document.getElementById("manual-batch-fee").value);
+    const net = parseAmountInput(document.getElementById("manual-batch-net").value);
+
+    if (!batchDate) {
+      setManualBatchStatus("Enter a batch date.", "error");
+      return;
+    }
+    if (!batchNumber) {
+      setManualBatchStatus("Enter a batch number.", "error");
+      return;
+    }
+    if (gross == null || fee == null || net == null) {
+      setManualBatchStatus("Enter valid dollar amounts for gross, fee, and net.", "error");
+      return;
+    }
+
+    const submitBtn = document.getElementById("manual-batch-submit-btn");
+    submitBtn.disabled = true;
+    setManualBatchStatus("Saving batch…", "info");
+
+    try {
+      const result = await window.api.insertBatches(
+        [
+          {
+            site_id: siteId,
+            batch_date: batchDate,
+            batch_number: batchNumber,
+            gross_amount: roundMoney(gross),
+            total_fee: roundMoney(fee),
+            net_amount: roundMoney(net),
+          },
+        ],
+        "manual-entry"
+      );
+
+      if (result.added === 0) {
+        setManualBatchStatus(
+          "That batch already exists (same date, batch #, and net amount).",
+          "error"
+        );
+        return;
+      }
+
+      closeManualBatchModal();
+
+      if (onManualBatchAdded) {
+        await onManualBatchAdded(result);
+      } else {
+        await refresh();
+      }
+
+      setStatus(
+        `Added batch #${batchNumber} for ${StoreSelector.formatDate(batchDate)} (${StoreSelector.formatMoney(net)}).`,
+        "success"
+      );
+    } catch (err) {
+      setManualBatchStatus(err.message || "Failed to save batch.", "error");
+    } finally {
+      submitBtn.disabled = false;
+    }
   }
 
   function normalizeBatchSearch(value) {
@@ -810,6 +956,7 @@ const ReconcileUI = (() => {
 
   function init(handlers) {
     onReconcileComplete = handlers.onReconcileComplete;
+    onManualBatchAdded = handlers.onManualBatchAdded || null;
 
     document.getElementById("reconcile-run-btn").addEventListener("click", async () => {
       await runReconciliation();
@@ -817,6 +964,20 @@ const ReconcileUI = (() => {
 
     document.getElementById("reconcile-confirm-btn").addEventListener("click", async () => {
       await confirmReconciliation();
+    });
+
+    document.getElementById("manual-batch-btn").addEventListener("click", () => {
+      openManualBatchModal();
+    });
+
+    document.getElementById("manual-batch-form").addEventListener("submit", (event) => {
+      submitManualBatch(event);
+    });
+
+    document.getElementById("manual-batch-gross").addEventListener("input", syncManualBatchNet);
+    document.getElementById("manual-batch-fee").addEventListener("input", syncManualBatchNet);
+    document.getElementById("manual-batch-net").addEventListener("input", () => {
+      netTouched = true;
     });
 
     const searchInput = document.getElementById("batch-search-input");

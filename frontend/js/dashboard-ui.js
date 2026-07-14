@@ -52,7 +52,8 @@ const DashboardUI = (() => {
     modal.hidden = true;
     if (
       document.getElementById("manage-stores-modal")?.hidden !== false &&
-      document.getElementById("add-pdf-modal")?.hidden !== false
+      document.getElementById("add-pdf-modal")?.hidden !== false &&
+      document.getElementById("manual-batch-modal")?.hidden !== false
     ) {
       document.body.style.overflow = "";
     }
@@ -227,6 +228,7 @@ const DashboardUI = (() => {
     document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
       if (!$("add-pdf-modal")?.hidden) closeAddPdfModal();
+      else if (!$("manual-batch-modal")?.hidden) closeModal("manual-batch-modal");
       else if (!$("manage-stores-modal")?.hidden) closeModal("manage-stores-modal");
     });
 

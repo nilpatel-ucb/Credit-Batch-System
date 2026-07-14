@@ -343,8 +343,7 @@ const App = (() => {
     }
   }
 
-  async function onBatchIngestComplete() {
-    DashboardUI.closeAddPdfModal();
+  async function refreshAfterBatchChange() {
     await renderBatches();
     await renderInvoices();
     const activeStore = StoreSelector.getActiveStore();
@@ -357,6 +356,18 @@ const App = (() => {
       const invoice = cachedInvoices.find((inv) => inv.id === selectedInvoiceId);
       const invoiceNumber = invoice ? invoice.invoice_number : "—";
       await showInvoiceLines(selectedInvoiceId, invoiceNumber);
+    }
+  }
+
+  async function onBatchIngestComplete() {
+    DashboardUI.closeAddPdfModal();
+    await refreshAfterBatchChange();
+  }
+
+  async function onManualBatchAdded(result) {
+    await refreshAfterBatchChange();
+    if (result?.reconciliation) {
+      ReconcileUI.render(result.reconciliation);
     }
   }
 
@@ -577,7 +588,7 @@ const App = (() => {
     StoreSelector.init({ onStoreChange });
     BatchIngestUI.init({ onIngestComplete: onBatchIngestComplete });
     InvoiceIngestUI.init({ onIngestComplete: onInvoiceIngestComplete });
-    ReconcileUI.init({ onReconcileComplete });
+    ReconcileUI.init({ onReconcileComplete, onManualBatchAdded });
   }
 
   return { init };
