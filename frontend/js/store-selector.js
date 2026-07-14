@@ -1,7 +1,10 @@
 const StoreSelector = (() => {
+  const SIDEBAR_COLLAPSED_KEY = "credit-batch.store-sidebar-collapsed";
+
   let activeStore = null;
   let activeSiteId = null;
   let onStoreChange = null;
+  let sidebarCollapsed = false;
 
   function formatMoney(value) {
     return Number(value).toLocaleString("en-US", {
@@ -137,8 +140,47 @@ const StoreSelector = (() => {
     return activeSiteId;
   }
 
+  function applySidebarCollapsed(collapsed) {
+    sidebarCollapsed = collapsed;
+    const layout = document.getElementById("app-layout");
+    const openBtn = document.getElementById("store-sidebar-open-btn");
+    const closeBtn = document.getElementById("store-sidebar-close-btn");
+
+    layout.classList.toggle("store-sidebar-collapsed", collapsed);
+    openBtn.hidden = !collapsed;
+    closeBtn.setAttribute("aria-expanded", String(!collapsed));
+    openBtn.setAttribute("aria-expanded", String(!collapsed));
+
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+    } catch {
+      // Ignore storage failures (private mode, etc.)
+    }
+  }
+
+  function toggleSidebar() {
+    applySidebarCollapsed(!sidebarCollapsed);
+  }
+
+  function initSidebarToggle() {
+    const closeBtn = document.getElementById("store-sidebar-close-btn");
+    const openBtn = document.getElementById("store-sidebar-open-btn");
+
+    closeBtn.addEventListener("click", () => applySidebarCollapsed(true));
+    openBtn.addEventListener("click", () => applySidebarCollapsed(false));
+
+    let initialCollapsed = false;
+    try {
+      initialCollapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+    } catch {
+      initialCollapsed = false;
+    }
+    applySidebarCollapsed(initialCollapsed);
+  }
+
   function init(handlers) {
     onStoreChange = handlers.onStoreChange;
+    initSidebarToggle();
 
     document.getElementById("create-store-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -190,6 +232,8 @@ const StoreSelector = (() => {
     setActiveStoreInfo,
     getActiveStore,
     getActiveSiteId,
+    toggleSidebar,
+    applySidebarCollapsed,
     formatMoney,
     formatDate,
     formatDateTime,

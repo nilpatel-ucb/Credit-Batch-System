@@ -31,9 +31,14 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 260px 1fr;
   gap: 1rem;
   align-items: start;
+  transition: grid-template-columns 0.2s ease;
+}
+
+.layout.store-sidebar-collapsed {
+  grid-template-columns: auto 1fr;
 }
 
 .panel {
@@ -47,6 +52,59 @@ body {
   margin: 0 0 0.75rem;
   font-size: 1rem;
   font-weight: 600;
+}
+
+.store-panel {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+.store-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.store-panel-header h2 {
+  margin: 0;
+}
+
+.store-sidebar-toggle {
+  flex-shrink: 0;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.8rem;
+  color: #5c6670;
+}
+
+.store-sidebar-open-btn {
+  position: sticky;
+  top: 1rem;
+  align-self: start;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  padding: 0.85rem 0.45rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #1e40af;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.store-sidebar-open-btn:hover {
+  background: #dbeafe;
+}
+
+.layout.store-sidebar-collapsed .store-panel {
+  display: none;
+}
+
+.layout:not(.store-sidebar-collapsed) .store-sidebar-open-btn {
+  display: none;
 }
 
 .store-list {
