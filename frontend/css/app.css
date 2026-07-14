@@ -458,10 +458,63 @@ th {
   margin-top: 1rem;
 }
 
-.reconciliation-section {
+.batch-search-section {
   margin-top: 1.5rem;
   padding-top: 1.5rem;
   border-top: 1px solid #eef2f6;
+}
+
+.batch-search-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.batch-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.batch-search-row input[type="search"] {
+  flex: 1 1 180px;
+  max-width: 280px;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #ccd4dc;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: #fff;
+}
+
+.batch-search-row input[type="search"]:disabled {
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+.batch-search-hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.batch-search-reconciled {
+  margin-top: 0.85rem;
+}
+
+.batch-search-reconciled .reconcile-subheading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+}
+
+.reconciliation-section {
+  margin-top: 1rem;
+  padding-top: 0;
+  border-top: none;
 }
 
 .reconcile-controls {

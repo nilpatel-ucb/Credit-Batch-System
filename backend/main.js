@@ -84,6 +84,10 @@ function registerIpcHandlers() {
 
   ipcMain.handle("reconcile:scope", () => storeManager.getReconciliationScope());
 
+  ipcMain.handle("reconcile:searchBatch", (_event, batchNumber) =>
+    storeManager.searchByBatchNumber(batchNumber)
+  );
+
   ipcMain.handle("reconcile:confirm", () => storeManager.confirmReconciliation());
 
   ipcMain.handle("reconcile:runs", () => storeManager.listReconciliationRuns());

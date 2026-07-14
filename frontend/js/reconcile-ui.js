@@ -2,6 +2,9 @@ const ReconcileUI = (() => {
   let storeOpen = false;
   let onReconcileComplete = null;
   let scopeBatches = [];
+  let scopeLines = [];
+  let batchSearchQuery = "";
+  let batchSearchToken = 0;
   let pendingConfirmCount = 0;
   let expandedRunId = null;
 
@@ -126,10 +129,155 @@ const ReconcileUI = (() => {
   function setControlsEnabled(enabled) {
     storeOpen = enabled;
     document.getElementById("reconcile-run-btn").disabled = !enabled;
+    document.getElementById("batch-search-input").disabled = !enabled;
+    document.getElementById("batch-search-clear-btn").disabled =
+      !enabled || !batchSearchQuery;
     if (!enabled) {
       pendingConfirmCount = 0;
+      clearBatchSearch({ render: false });
     }
     updateConfirmButton();
+  }
+
+  function normalizeBatchSearch(value) {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return "";
+    return StoreSelector.stripLeadingZeros(trimmed);
+  }
+
+  function matchesBatchSearch(batchNumber, query) {
+    if (!query) return true;
+    const normalized = normalizeBatchSearch(batchNumber);
+    return normalized === query || normalized.startsWith(query);
+  }
+
+  function filterByBatchSearch(batches, lines) {
+    const query = normalizeBatchSearch(batchSearchQuery);
+    if (!query) {
+      return { batches, lines, query: "" };
+    }
+    return {
+      batches: batches.filter((batch) => matchesBatchSearch(batch.batch_number, query)),
+      lines: lines.filter((line) => matchesBatchSearch(line.batch_number, query)),
+      query,
+    };
+  }
+
+  function updateBatchSearchHint(filtered, reconciledCount = 0) {
+    const hint = document.getElementById("batch-search-hint");
+    if (!filtered.query) {
+      hint.hidden = true;
+      hint.textContent = "";
+      return;
+    }
+
+    const batchLabel =
+      filtered.batches.length === 1 ? "1 open batch" : `${filtered.batches.length} open batches`;
+    const lineLabel =
+      filtered.lines.length === 1
+        ? "1 open invoice line"
+        : `${filtered.lines.length} open invoice lines`;
+    const reconciledLabel =
+      reconciledCount === 1
+        ? "1 reconciled match"
+        : `${reconciledCount} reconciled matches`;
+    hint.hidden = false;
+    hint.textContent = `Showing ${batchLabel}, ${lineLabel}, and ${reconciledLabel} for batch #${filtered.query}.`;
+  }
+
+  function renderReconciledSearchResults(rows, query) {
+    const panel = document.getElementById("batch-search-reconciled");
+    const countEl = document.getElementById("batch-search-reconciled-count");
+    const tbody = document.querySelector("#batch-search-reconciled-table tbody");
+
+    if (!query) {
+      panel.hidden = true;
+      countEl.textContent = "0";
+      tbody.innerHTML = "";
+      return;
+    }
+
+    panel.hidden = false;
+    countEl.textContent = String(rows.length);
+
+    if (!rows.length) {
+      tbody.innerHTML = `<tr class="empty-row"><td colspan="7">No reconciled matches for #${query}</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = rows
+      .map(
+        (row) => `<tr class="row-reconcile-matched">
+          <td>${StoreSelector.formatDate(row.batchDate)}</td>
+          <td>${StoreSelector.stripLeadingZeros(row.batchNumber)}</td>
+          <td class="num">${
+            row.netAmount != null ? StoreSelector.formatMoney(row.netAmount) : "—"
+          }</td>
+          <td>${row.invoiceNumber || "—"}</td>
+          <td>${row.invoiceLineId || "—"}</td>
+          <td class="num">${
+            row.invoiceAmount != null
+              ? StoreSelector.formatMoney(row.invoiceAmount)
+              : "—"
+          }</td>
+          <td>${row.runAt ? StoreSelector.formatDateTime(row.runAt) : "—"}</td>
+        </tr>`
+      )
+      .join("");
+  }
+
+  async function renderFilteredScope() {
+    const filtered = filterByBatchSearch(scopeBatches, scopeLines);
+    renderBatchesTable(filtered.batches, {
+      emptyMessage: filtered.query
+        ? `No open batches matching #${filtered.query}`
+        : "No open batches to reconcile",
+    });
+    renderLinesTable(filtered.lines, {
+      emptyMessage: filtered.query
+        ? `No open invoice lines matching #${filtered.query}`
+        : "No open invoice lines to reconcile",
+    });
+    document.getElementById("batch-search-clear-btn").disabled =
+      !storeOpen || !batchSearchQuery;
+
+    if (!filtered.query || !storeOpen) {
+      batchSearchToken += 1;
+      renderReconciledSearchResults([], "");
+      updateBatchSearchHint(filtered, 0);
+      return;
+    }
+
+    const token = ++batchSearchToken;
+    updateBatchSearchHint(filtered, 0);
+
+    try {
+      const result = await window.api.searchByBatchNumber(filtered.query);
+      if (token !== batchSearchToken) return;
+      const reconciled = result.reconciled || [];
+      renderReconciledSearchResults(reconciled, filtered.query);
+      updateBatchSearchHint(filtered, reconciled.length);
+    } catch (err) {
+      if (token !== batchSearchToken) return;
+      renderReconciledSearchResults([], filtered.query);
+      updateBatchSearchHint(filtered, 0);
+      setStatus(err.message || "Batch search failed.", "error");
+    }
+  }
+
+  function clearBatchSearch(options = {}) {
+    const { render = true } = options;
+    batchSearchQuery = "";
+    batchSearchToken += 1;
+    const input = document.getElementById("batch-search-input");
+    if (input) input.value = "";
+    document.getElementById("batch-search-clear-btn").disabled = true;
+    document.getElementById("batch-search-hint").hidden = true;
+    document.getElementById("batch-search-hint").textContent = "";
+    renderReconciledSearchResults([], "");
+    if (render) {
+      renderFilteredScope();
+    }
   }
 
   function renderSummary(summary, batches = scopeBatches) {
@@ -196,13 +344,13 @@ const ReconcileUI = (() => {
     });
   }
 
-  function renderBatchesTable(batches) {
+  function renderBatchesTable(batches, options = {}) {
     const tbody = document.querySelector("#reconcile-batches-table tbody");
     document.getElementById("reconcile-batch-count").textContent = String(batches.length);
+    const emptyMessage = options.emptyMessage || "No open batches to reconcile";
 
     if (!batches || batches.length === 0) {
-      tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="4">No open batches to reconcile</td></tr>';
+      tbody.innerHTML = `<tr class="empty-row"><td colspan="4">${emptyMessage}</td></tr>`;
       return;
     }
 
@@ -218,13 +366,13 @@ const ReconcileUI = (() => {
       .join("");
   }
 
-  function renderLinesTable(lines) {
+  function renderLinesTable(lines, options = {}) {
     const tbody = document.querySelector("#reconcile-lines-table tbody");
     document.getElementById("reconcile-line-count").textContent = String(lines.length);
+    const emptyMessage = options.emptyMessage || "No open invoice lines to reconcile";
 
     if (!lines || lines.length === 0) {
-      tbody.innerHTML =
-        '<tr class="empty-row"><td colspan="6">No open invoice lines to reconcile</td></tr>';
+      tbody.innerHTML = `<tr class="empty-row"><td colspan="6">${emptyMessage}</td></tr>`;
       return;
     }
 
@@ -245,17 +393,17 @@ const ReconcileUI = (() => {
   function renderScope(scope) {
     if (!scope) {
       scopeBatches = [];
+      scopeLines = [];
       pendingConfirmCount = 0;
-      renderBatchesTable([]);
-      renderLinesTable([]);
+      renderFilteredScope();
       updateConfirmButton();
       return;
     }
 
     scopeBatches = scope.batches;
+    scopeLines = scope.lines;
     pendingConfirmCount = Number(scope.pendingConfirmCount || 0);
-    renderBatchesTable(scope.batches);
-    renderLinesTable(scope.lines);
+    renderFilteredScope();
     updateConfirmButton();
   }
 
@@ -386,12 +534,12 @@ const ReconcileUI = (() => {
   function resetView() {
     setControlsEnabled(false);
     scopeBatches = [];
+    scopeLines = [];
     pendingConfirmCount = 0;
     expandedRunId = null;
     renderSummary(null);
     renderCoverage(null);
-    renderBatchesTable([]);
-    renderLinesTable([]);
+    renderFilteredScope();
     renderReconciledRuns([]);
     setStatus("");
   }
@@ -524,6 +672,17 @@ const ReconcileUI = (() => {
 
     document.getElementById("reconcile-confirm-btn").addEventListener("click", async () => {
       await confirmReconciliation();
+    });
+
+    const searchInput = document.getElementById("batch-search-input");
+    searchInput.addEventListener("input", () => {
+      batchSearchQuery = searchInput.value;
+      renderFilteredScope();
+    });
+
+    document.getElementById("batch-search-clear-btn").addEventListener("click", () => {
+      clearBatchSearch();
+      searchInput.focus();
     });
 
     resetView();

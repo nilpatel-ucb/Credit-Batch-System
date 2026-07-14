@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld("api", {
   reconcileStore: () => ipcRenderer.invoke("reconcile:run"),
   getLastReconciliation: () => ipcRenderer.invoke("reconcile:last"),
   getReconciliationScope: () => ipcRenderer.invoke("reconcile:scope"),
+  searchByBatchNumber: (batchNumber) =>
+    ipcRenderer.invoke("reconcile:searchBatch", batchNumber),
   confirmReconciliation: () => ipcRenderer.invoke("reconcile:confirm"),
   listReconciliationRuns: () => ipcRenderer.invoke("reconcile:runs"),
   getReconciliationRun: (runId) => ipcRenderer.invoke("reconcile:runDetail", runId),

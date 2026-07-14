@@ -1028,6 +1028,102 @@ function createStoreManager(storesDir) {
     };
   }
 
+  function searchByBatchNumber(rawQuery) {
+    requireDb();
+    const trimmed = String(rawQuery || "").trim();
+    const query = trimmed ? Normalize.stripLeadingZeros(trimmed) : "";
+    if (!query) {
+      return {
+        query: "",
+        openBatches: [],
+        openLines: [],
+        reconciled: [],
+      };
+    }
+
+    function matches(batchNumber) {
+      const normalized = Normalize.stripLeadingZeros(batchNumber);
+      return normalized === query || normalized.startsWith(query);
+    }
+
+    const allBatches = getBatches();
+    const allLines = getAllInvoiceLines();
+    const runMeta = new Map(
+      listReconciliationRuns().map((run) => [run.id, run])
+    );
+
+    const openBatches = allBatches.filter(
+      (batch) => batch.reconciliation_run_id == null && matches(batch.batch_number)
+    );
+    const openLines = allLines.filter(
+      (line) => line.reconciliation_run_id == null && matches(line.batch_number)
+    );
+
+    const reconciledBatches = allBatches.filter(
+      (batch) => batch.reconciliation_run_id != null && matches(batch.batch_number)
+    );
+    const includedLineIds = new Set();
+
+    const reconciled = reconciledBatches.map((batch) => {
+      const linkedLines = allLines.filter((line) => line.batch_id === batch.id);
+      linkedLines.forEach((line) => includedLineIds.add(line.id));
+      const primaryLine =
+        linkedLines.find((line) => Number(line.amount) < 0) || linkedLines[0];
+      const run = runMeta.get(batch.reconciliation_run_id);
+      return {
+        batchId: batch.id,
+        batchDate: batch.batch_date,
+        batchNumber: batch.batch_number,
+        netAmount: batch.net_amount,
+        invoiceNumber: primaryLine ? primaryLine.invoice_number : null,
+        invoiceLineId:
+          linkedLines.map((line) => line.invoice_line_id).join(", ") ||
+          batch.invoice_line_id,
+        invoiceAmount:
+          batch.invoice_amount != null ? Number(batch.invoice_amount) : null,
+        runId: batch.reconciliation_run_id,
+        runAt: run ? run.run_at : batch.last_reconciled_at,
+      };
+    });
+
+    const orphanReconciledLines = allLines.filter(
+      (line) =>
+        line.reconciliation_run_id != null &&
+        matches(line.batch_number) &&
+        !includedLineIds.has(line.id)
+    );
+
+    for (const line of orphanReconciledLines) {
+      const run = runMeta.get(line.reconciliation_run_id);
+      reconciled.push({
+        batchId: line.batch_id,
+        batchDate: line.inv_date,
+        batchNumber: line.batch_number,
+        netAmount: null,
+        invoiceNumber: line.invoice_number,
+        invoiceLineId: line.invoice_line_id,
+        invoiceAmount: Number(line.amount),
+        runId: line.reconciliation_run_id,
+        runAt: run ? run.run_at : null,
+      });
+    }
+
+    reconciled.sort((a, b) => {
+      const runCmp = String(b.runAt || "").localeCompare(String(a.runAt || ""));
+      if (runCmp !== 0) return runCmp;
+      const dateCmp = String(a.batchDate || "").localeCompare(String(b.batchDate || ""));
+      if (dateCmp !== 0) return dateCmp;
+      return String(a.batchNumber).localeCompare(String(b.batchNumber));
+    });
+
+    return {
+      query,
+      openBatches,
+      openLines,
+      reconciled,
+    };
+  }
+
   return {
     listStores,
     createStore,
@@ -1048,6 +1144,7 @@ function createStoreManager(storesDir) {
     getInvoiceForReconcile,
     getBatchesInPeriod,
     getReconciliationScope,
+    searchByBatchNumber,
     reconcileStore,
     getStoreReconciliation,
     confirmReconciliation,
