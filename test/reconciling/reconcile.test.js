@@ -336,7 +336,7 @@ function testSameDayDuplicateBatchesUnderCreditedWhenOnlyOneSidePaid() {
   assert.strictEqual(result.summary.mismatchCount, 2);
 }
 
-function testCreditDiscrepancyUsesMatchedNetsOnly() {
+function testCreditDiscrepancyEqualsTotalMissingCredit() {
   const result = reconcile({
     invoice: sampleInvoice(),
     lines: sampleLines(),
@@ -344,7 +344,8 @@ function testCreditDiscrepancyUsesMatchedNetsOnly() {
   });
 
   assert.strictEqual(result.summary.totalCredit, 4317.73);
-  assert.strictEqual(result.summary.creditDiscrepancy, 31064.22);
+  assert.strictEqual(result.summary.totalMissingCredit, 2578.36);
+  assert.strictEqual(result.summary.creditDiscrepancy, 2578.36);
 }
 
 function sampleInvoicePayload() {
@@ -761,7 +762,7 @@ function run() {
   testDifferentDaySameBatchNumberNetsTogether();
   testSameDayDuplicateBatchesAreNettedTogether();
   testSameDayDuplicateBatchesUnderCreditedWhenOnlyOneSidePaid();
-  testCreditDiscrepancyUsesMatchedNetsOnly();
+  testCreditDiscrepancyEqualsTotalMissingCredit();
   testBatchOutsideInvoicePeriodStillMatchesByNumberAndAmount();
   testNetMatchWithReversalAndRecredit();
   testNetZeroMarksReversed();

@@ -161,7 +161,7 @@ function buildSummary(
     totalFee: round2(totalFee),
     totalCredit: round2(totalCredit),
     invoiceTotal: normalizedInvoiceTotal,
-    creditDiscrepancy: round2(normalizedInvoiceTotal - totalCredit),
+    creditDiscrepancy: round2(totalMissingCredit),
     totalMissingCredit: round2(totalMissingCredit),
   };
 }

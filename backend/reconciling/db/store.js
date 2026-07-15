@@ -923,7 +923,7 @@ function createStoreManager(storesDir) {
         totalFee: Math.round(totalFee * 100) / 100,
         totalCredit: Math.round(totalCredit * 100) / 100,
         invoiceTotal: Math.round(invoiceTotal * 100) / 100,
-        creditDiscrepancy: Math.round((invoiceTotal - totalCredit) * 100) / 100,
+        creditDiscrepancy: Math.round(totalMissingCredit * 100) / 100,
         totalMissingCredit: Math.round(totalMissingCredit * 100) / 100,
       },
       matched,

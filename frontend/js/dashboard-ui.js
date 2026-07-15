@@ -202,7 +202,7 @@ const DashboardUI = (() => {
       const runAt = result.runAt ? StoreSelector.formatDateTime(result.runAt) : "";
       discSub.textContent = runAt
         ? `last preview ${runAt}`
-        : "invoice total − matched net";
+        : "net on batches missing from invoice";
     }
   }
 
