@@ -1,17 +1,37 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const path = require("path");
-const os = require("os");
+const fs = require("fs");
 const { createStoreManager } = require("./reconciling/db/store");
+const {
+  DEFAULT_DATA_ROOT,
+  loadDataRoot,
+  saveDataRoot,
+  getStoresDir,
+  countStoreDatabases,
+  moveStoreFiles,
+} = require("./paths");
 
 let mainWindow = null;
 let storeManager = null;
+let dataRoot = DEFAULT_DATA_ROOT;
 
-function getDataRoot() {
-  return path.join(os.homedir(), "Documents", "Credit Batch Reconciler");
+function initStoreManager() {
+  if (storeManager) {
+    storeManager.close();
+  }
+  const storesDir = getStoresDir(dataRoot);
+  fs.mkdirSync(storesDir, { recursive: true });
+  storeManager = createStoreManager(storesDir);
 }
 
-function getStoresDir() {
-  return path.join(getDataRoot(), "Stores");
+function getStorageInfo() {
+  const storesDir = getStoresDir(dataRoot);
+  return {
+    dataRoot,
+    storesDir,
+    defaultDataRoot: DEFAULT_DATA_ROOT,
+    storeCount: countStoreDatabases(storesDir),
+  };
 }
 
 function createWindow() {
@@ -34,6 +54,63 @@ function createWindow() {
 }
 
 function registerIpcHandlers() {
+  ipcMain.handle("paths:get", () => getStorageInfo());
+
+  ipcMain.handle("paths:chooseFolder", async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Choose storage location",
+      defaultPath: dataRoot,
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || !result.filePaths.length) {
+      return null;
+    }
+    return path.resolve(result.filePaths[0]);
+  });
+
+  ipcMain.handle("paths:set", (_event, newDataRoot, moveExisting) => {
+    if (!newDataRoot || typeof newDataRoot !== "string") {
+      throw new Error("Storage location is required.");
+    }
+
+    const nextRoot = path.resolve(newDataRoot);
+    const currentStoresDir = getStoresDir(dataRoot);
+    const nextStoresDir = getStoresDir(nextRoot);
+
+    if (path.resolve(nextRoot) === path.resolve(dataRoot)) {
+      return { ...getStorageInfo(), movedCount: 0, changed: false };
+    }
+
+    const existingCount = countStoreDatabases(currentStoresDir);
+    const nextCount = countStoreDatabases(nextStoresDir);
+    let movedCount = 0;
+
+    if (storeManager) {
+      storeManager.close();
+      storeManager = null;
+    }
+
+    if (existingCount > 0 && moveExisting) {
+      movedCount = moveStoreFiles(currentStoresDir, nextStoresDir);
+    } else if (existingCount > 0 && !moveExisting && nextCount === 0) {
+      throw new Error(
+        "The current location has store databases. Enable “Move existing store files” or choose a folder that already contains them."
+      );
+    } else {
+      fs.mkdirSync(nextStoresDir, { recursive: true });
+    }
+
+    dataRoot = nextRoot;
+    saveDataRoot(app, dataRoot);
+    initStoreManager();
+
+    return {
+      ...getStorageInfo(),
+      movedCount,
+      changed: true,
+    };
+  });
+
   ipcMain.handle("stores:list", () => storeManager.listStores());
 
   ipcMain.handle("stores:create", (_event, name, siteId) =>
@@ -47,6 +124,15 @@ function registerIpcHandlers() {
   ipcMain.handle("stores:update", (_event, name, siteId) =>
     storeManager.updateStore(name, siteId)
   );
+
+  ipcMain.handle("stores:delete", (_event, name) => storeManager.deleteStore(name));
+
+  ipcMain.handle("shell:showItemInFolder", (_event, filePath) => {
+    if (!filePath || typeof filePath !== "string") {
+      throw new Error("File path is required.");
+    }
+    shell.showItemInFolder(filePath);
+  });
 
   ipcMain.handle("batches:list", () => storeManager.getBatches());
 
@@ -126,7 +212,8 @@ function registerIpcHandlers() {
 }
 
 app.whenReady().then(() => {
-  storeManager = createStoreManager(getStoresDir());
+  dataRoot = loadDataRoot(app);
+  initStoreManager();
   registerIpcHandlers();
   createWindow();
 

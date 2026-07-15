@@ -212,6 +212,26 @@ function testUpdateStoreNameAndSiteId() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+function testDeleteStore() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.createStore("Mako", "222222");
+  manager.openStore("Sunset");
+
+  const result = manager.deleteStore("Sunset");
+  assert.strictEqual(result.deleted, "Sunset");
+  assert.ok(!fs.existsSync(path.join(dir, "Sunset.db")));
+  assert.strictEqual(manager.getCurrentStoreName(), null);
+
+  const stores = manager.listStores();
+  assert.deepStrictEqual(stores, [{ name: "Mako", site_id: "222222" }]);
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 function testRejectSiteIdChangeWhenBatchesExist() {
   const dir = makeTempStoresDir();
   const manager = createStoreManager(dir);
@@ -852,6 +872,7 @@ function run() {
   testRejectMismatchedSiteId();
   testRejectDuplicateSiteIdAcrossStores();
   testUpdateStoreNameAndSiteId();
+  testDeleteStore();
   testRejectSiteIdChangeWhenBatchesExist();
   testSchemaCreated();
   testInsertInvoicePersistsHeaderAndLines();

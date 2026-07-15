@@ -5,6 +5,12 @@ contextBridge.exposeInMainWorld("api", {
   createStore: (name, siteId) => ipcRenderer.invoke("stores:create", name, siteId),
   openStore: (name) => ipcRenderer.invoke("stores:open", name),
   updateStore: (name, siteId) => ipcRenderer.invoke("stores:update", name, siteId),
+  deleteStore: (name) => ipcRenderer.invoke("stores:delete", name),
+  showItemInFolder: (filePath) => ipcRenderer.invoke("shell:showItemInFolder", filePath),
+  getStorageInfo: () => ipcRenderer.invoke("paths:get"),
+  chooseStorageFolder: () => ipcRenderer.invoke("paths:chooseFolder"),
+  setStorageLocation: (dataRoot, moveExisting) =>
+    ipcRenderer.invoke("paths:set", dataRoot, moveExisting),
   getBatches: () => ipcRenderer.invoke("batches:list"),
   getBatchCount: () => ipcRenderer.invoke("batches:count"),
   insertBatches: (records, sourcePdf) =>

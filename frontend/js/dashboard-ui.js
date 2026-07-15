@@ -53,7 +53,8 @@ const DashboardUI = (() => {
     if (!modal) return;
     modal.hidden = true;
     if (
-      document.getElementById("manage-stores-modal")?.hidden !== false &&
+      document.getElementById("store-form-modal")?.hidden !== false &&
+      document.getElementById("storage-location-modal")?.hidden !== false &&
       document.getElementById("add-pdf-modal")?.hidden !== false &&
       document.getElementById("manual-batch-modal")?.hidden !== false
     ) {
@@ -121,15 +122,151 @@ const DashboardUI = (() => {
     $("gauge-amt").textContent = usd(received);
   }
 
-  function updateBrand(storeName, siteId) {
-    const sub = $("brand-sub");
-    if (!sub) return;
-    if (!storeName) {
-      sub.textContent = "Select a store";
+  function shortenHomePath(filePath) {
+    if (!filePath) return "";
+    const home = filePath.match(/^\/Users\/[^/]+/)?.[0];
+    if (home) return `~${filePath.slice(home.length)}`;
+    return filePath;
+  }
+
+  let activeDbPath = null;
+  let storageInfo = null;
+  let pendingStorageRoot = null;
+  let onStorageLocationChanged = null;
+
+  function setStorageLocationStatus(message, type = "info") {
+    const el = $("storage-location-status");
+    if (!el) return;
+    if (!message) {
+      el.hidden = true;
+      el.textContent = "";
+      el.className = "storage-location-status";
       return;
     }
-    const site = siteId ? `SITE ${siteId}` : "LOCAL LEDGER";
-    sub.textContent = `${String(storeName).toUpperCase()}.DB · ${site}`;
+    el.hidden = false;
+    el.textContent = message;
+    el.className = `storage-location-status ${type}`;
+  }
+
+  function resetStorageLocationModal() {
+    pendingStorageRoot = null;
+    $("storage-new-block")?.setAttribute("hidden", "");
+    $("storage-move-wrap")?.setAttribute("hidden", "");
+    $("storage-save-btn")?.setAttribute("disabled", "");
+    setStorageLocationStatus("");
+  }
+
+  function updateStorageLocationModal() {
+    if (!storageInfo) return;
+    $("storage-current-path").textContent = storageInfo.dataRoot;
+    const saveBtn = $("storage-save-btn");
+    const moveWrap = $("storage-move-wrap");
+    const moveLabel = $("storage-move-label");
+
+    if (!pendingStorageRoot || pendingStorageRoot === storageInfo.dataRoot) {
+      $("storage-new-block")?.setAttribute("hidden", "");
+      moveWrap?.setAttribute("hidden", "");
+      saveBtn?.setAttribute("disabled", "");
+      return;
+    }
+
+    $("storage-new-path").textContent = pendingStorageRoot;
+    $("storage-new-block")?.removeAttribute("hidden");
+    saveBtn?.removeAttribute("disabled");
+
+    if (storageInfo.storeCount > 0) {
+      moveWrap?.removeAttribute("hidden");
+      moveLabel.textContent =
+        `Move ${storageInfo.storeCount} existing store file${storageInfo.storeCount === 1 ? "" : "s"} to the new location`;
+    } else {
+      moveWrap?.setAttribute("hidden", "");
+    }
+  }
+
+  async function openStorageLocationModal() {
+    try {
+      storageInfo = await window.api.getStorageInfo();
+      pendingStorageRoot = null;
+      resetStorageLocationModal();
+      $("storage-current-path").textContent = storageInfo.dataRoot;
+      openModal("storage-location-modal");
+    } catch (err) {
+      alert(err.message || "Could not load storage location.");
+    }
+  }
+
+  async function chooseStorageFolder() {
+    try {
+      const chosen = await window.api.chooseStorageFolder();
+      if (!chosen) return;
+      pendingStorageRoot = chosen;
+      updateStorageLocationModal();
+      setStorageLocationStatus("");
+    } catch (err) {
+      setStorageLocationStatus(err.message || "Could not choose folder.", "error");
+    }
+  }
+
+  async function saveStorageLocation() {
+    if (!pendingStorageRoot || !storageInfo) return;
+    if (pendingStorageRoot === storageInfo.dataRoot) {
+      closeModal("storage-location-modal");
+      return;
+    }
+
+    const moveExisting = storageInfo.storeCount > 0 && $("storage-move-checkbox")?.checked;
+    if (storageInfo.storeCount > 0 && !moveExisting) {
+      setStorageLocationStatus(
+        "Move existing store files or choose a location that already contains your Stores folder.",
+        "error"
+      );
+      return;
+    }
+
+    const saveBtn = $("storage-save-btn");
+    saveBtn.disabled = true;
+    setStorageLocationStatus("Updating storage location…");
+
+    try {
+      const result = await window.api.setStorageLocation(pendingStorageRoot, moveExisting);
+      storageInfo = result;
+      closeModal("storage-location-modal");
+      resetStorageLocationModal();
+
+      if (onStorageLocationChanged) {
+        await onStorageLocationChanged(result);
+      }
+    } catch (err) {
+      setStorageLocationStatus(err.message || "Failed to update storage location.", "error");
+      saveBtn.disabled = false;
+    }
+  }
+
+  function updateBrand(storeName, siteId, dbPath) {
+    const sub = $("brand-sub");
+    if (!sub) return;
+    activeDbPath = dbPath || null;
+
+    if (!storeName || !dbPath) {
+      sub.textContent = "Select a store";
+      sub.disabled = true;
+      sub.title = "Select a store to reveal its database file";
+      return;
+    }
+
+    const site = siteId ? ` · SITE ${siteId}` : "";
+    sub.textContent = `${shortenHomePath(dbPath)}${site}`;
+    sub.disabled = false;
+    sub.title = `Show in Finder: ${dbPath}`;
+  }
+
+  async function revealActiveDbPath() {
+    if (!activeDbPath) return;
+    try {
+      await window.api.showItemInFolder(activeDbPath);
+    } catch (err) {
+      alert(err.message || "Could not open the database location.");
+    }
   }
 
   function updateCounts({ batches = 0, invoices = 0, recons = 0 } = {}) {
@@ -228,15 +365,29 @@ const DashboardUI = (() => {
     }
   }
 
-  function init() {
+  function init(options = {}) {
+    onStorageLocationChanged = options.onStorageLocationChanged || null;
+
     document.querySelectorAll(".tabs[aria-label='Sections'] .tab").forEach((tab) => {
       tab.addEventListener("click", () => showPanel(tab.dataset.panel));
     });
 
-    $("manage-stores-btn")?.addEventListener("click", () => {
-      if (typeof StoreSelector !== "undefined") StoreSelector.setSidebarOpen(false);
-      openModal("manage-stores-modal");
+    $("brand-sub")?.addEventListener("click", () => {
+      revealActiveDbPath();
     });
+
+    $("change-storage-btn")?.addEventListener("click", () => {
+      openStorageLocationModal();
+    });
+
+    $("storage-choose-btn")?.addEventListener("click", () => {
+      chooseStorageFolder();
+    });
+
+    $("storage-save-btn")?.addEventListener("click", () => {
+      saveStorageLocation();
+    });
+
     $("add-pdf-btn")?.addEventListener("click", () => {
       setIngestPanel("chevron");
       openModal("add-pdf-modal");
@@ -254,7 +405,8 @@ const DashboardUI = (() => {
       if (e.key !== "Escape") return;
       if (!$("add-pdf-modal")?.hidden) closeAddPdfModal();
       else if (!$("manual-batch-modal")?.hidden) closeModal("manual-batch-modal");
-      else if (!$("manage-stores-modal")?.hidden) closeModal("manage-stores-modal");
+      else if (!$("store-form-modal")?.hidden) closeModal("store-form-modal");
+      else if (!$("storage-location-modal")?.hidden) closeModal("storage-location-modal");
       else if (typeof StoreSelector !== "undefined") StoreSelector.setSidebarOpen(false);
     });
 

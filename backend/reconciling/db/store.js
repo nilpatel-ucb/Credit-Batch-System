@@ -215,6 +215,7 @@ function createStoreManager(storesDir) {
       name: currentStoreName,
       site_id: meta ? meta.site_id : null,
       batchCount: getBatchCount(),
+      dbPath: dbPath(currentStoreName),
     };
   }
 
@@ -232,6 +233,7 @@ function createStoreManager(storesDir) {
       name: currentStoreName,
       site_id: meta ? meta.site_id : null,
       batchCount: getBatchCount(),
+      dbPath: dbPath(currentStoreName),
     };
   }
 
@@ -505,7 +507,28 @@ function createStoreManager(storesDir) {
       name: currentStoreName,
       site_id: newSiteId,
       batchCount: getBatchCount(),
+      dbPath: dbPath(currentStoreName),
     };
+  }
+
+  function deleteStore(name) {
+    const storeName = sanitizeStoreName(name);
+    const filePath = dbPath(storeName);
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Store "${storeName}" does not exist.`);
+    }
+
+    if (currentStoreName === storeName) {
+      close();
+    }
+
+    for (const candidate of [filePath, `${filePath}-wal`, `${filePath}-shm`]) {
+      if (fs.existsSync(candidate)) {
+        fs.unlinkSync(candidate);
+      }
+    }
+
+    return { deleted: storeName };
   }
 
   function computeInvoicePeriod(batchLines) {
@@ -1325,6 +1348,7 @@ function createStoreManager(storesDir) {
     setBatchExpectedOnNextInvoice,
     getStoreInfo,
     updateStore,
+    deleteStore,
     insertBatches,
     insertInvoice,
     getInvoices,

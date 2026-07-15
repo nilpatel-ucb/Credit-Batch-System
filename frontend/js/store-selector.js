@@ -3,6 +3,9 @@ const StoreSelector = (() => {
   let activeSiteId = null;
   let onStoreChange = null;
   let sidebarOpen = false;
+  let storeFormMode = "add"; // "add" | "edit"
+  let editingStoreName = null;
+  let contextStore = null; // { name, site_id }
 
   function formatMoney(value) {
     return Number(value).toLocaleString("en-US", {
@@ -28,46 +31,18 @@ const StoreSelector = (() => {
     return stripped || "0";
   }
 
-  function formatStoreLabel(store) {
-    if (typeof store === "string") {
-      return store;
-    }
-    if (store.site_id) {
-      return `${store.name} (${store.site_id})`;
-    }
-    return store.name;
-  }
-
-  function setEditStoreStatus(message, type = "info") {
-    const el = document.getElementById("edit-store-status");
+  function setStoreFormStatus(message, type = "info") {
+    const el = document.getElementById("store-form-status");
+    if (!el) return;
     if (!message) {
       el.hidden = true;
       el.textContent = "";
-      el.className = "edit-store-status";
+      el.className = "store-form-status";
       return;
     }
     el.hidden = false;
     el.textContent = message;
-    el.className = `edit-store-status ${type}`;
-  }
-
-  function populateEditStoreForm(name, siteId) {
-    const section = document.getElementById("edit-store-section");
-    const nameInput = document.getElementById("edit-store-name");
-    const siteInput = document.getElementById("edit-store-site-id");
-
-    if (!name) {
-      section.hidden = true;
-      nameInput.value = "";
-      siteInput.value = "";
-      setEditStoreStatus("");
-      return;
-    }
-
-    section.hidden = false;
-    nameInput.value = name;
-    siteInput.value = siteId || "";
-    setEditStoreStatus("");
+    el.className = `store-form-status ${type}`;
   }
 
   function updateStoreToggleLabel(name) {
@@ -109,6 +84,7 @@ const StoreSelector = (() => {
       sidebar.classList.remove("open");
       backdrop?.classList.remove("open");
       toggle?.setAttribute("aria-expanded", "false");
+      hideStoreContextMenu();
       const finish = () => {
         if (!sidebarOpen) {
           sidebar.hidden = true;
@@ -146,7 +122,60 @@ const StoreSelector = (() => {
     }
   }
 
-  function setActiveStoreInfo(name, siteId, batchCount) {
+  function hideStoreContextMenu() {
+    const menu = document.getElementById("store-context-menu");
+    if (menu) menu.hidden = true;
+    contextStore = null;
+  }
+
+  function showStoreContextMenu(event, store) {
+    const menu = document.getElementById("store-context-menu");
+    if (!menu) return;
+    contextStore = store;
+    menu.hidden = false;
+
+    const pad = 8;
+    const { width, height } = menu.getBoundingClientRect();
+    let left = event.clientX;
+    let top = event.clientY;
+    if (left + width > window.innerWidth - pad) left = window.innerWidth - width - pad;
+    if (top + height > window.innerHeight - pad) top = window.innerHeight - height - pad;
+    menu.style.left = `${Math.max(pad, left)}px`;
+    menu.style.top = `${Math.max(pad, top)}px`;
+  }
+
+  function openStoreForm(mode, store = null) {
+    storeFormMode = mode;
+    editingStoreName = store ? store.name : null;
+    const modal = document.getElementById("store-form-modal");
+    const title = document.getElementById("store-form-title");
+    const submit = document.getElementById("store-form-submit");
+    const nameInput = document.getElementById("store-form-name");
+    const siteInput = document.getElementById("store-form-site-id");
+
+    if (mode === "edit" && store) {
+      title.textContent = "Edit store";
+      submit.textContent = "Save changes";
+      nameInput.value = store.name || "";
+      siteInput.value = store.site_id || "";
+    } else {
+      title.textContent = "Add store";
+      submit.textContent = "Add store";
+      nameInput.value = "";
+      siteInput.value = "";
+    }
+
+    setStoreFormStatus("");
+    if (typeof DashboardUI !== "undefined") {
+      DashboardUI.openModal("store-form-modal");
+    } else if (modal) {
+      modal.hidden = false;
+    }
+    nameInput.focus();
+    nameInput.select?.();
+  }
+
+  function setActiveStoreInfo(name, siteId, batchCount, dbPath) {
     activeStore = name;
     activeSiteId = siteId || null;
     const siteLabel = siteId ? ` · site ${siteId}` : "";
@@ -154,9 +183,19 @@ const StoreSelector = (() => {
       `Active: ${name}${siteLabel} (${batchCount} batches)`;
     document.getElementById("batch-count-badge").textContent = String(batchCount);
     updateStoreToggleLabel(name);
-    populateEditStoreForm(name, siteId);
     if (typeof DashboardUI !== "undefined") {
-      DashboardUI.updateBrand(name, siteId);
+      DashboardUI.updateBrand(name, siteId, dbPath);
+    }
+  }
+
+  function clearActiveStore() {
+    activeStore = null;
+    activeSiteId = null;
+    document.getElementById("active-store").textContent = "No store selected";
+    document.getElementById("batch-count-badge").textContent = "0";
+    updateStoreToggleLabel(null);
+    if (typeof DashboardUI !== "undefined") {
+      DashboardUI.updateBrand(null, null, null);
     }
   }
 
@@ -169,7 +208,7 @@ const StoreSelector = (() => {
     if (!stores.length) {
       const empty = document.createElement("p");
       empty.className = "store-sidebar-empty";
-      empty.textContent = "No stores yet — use Manage to add one.";
+      empty.textContent = "No stores yet — click Add store.";
       switchEl.appendChild(empty);
       return;
     }
@@ -192,8 +231,17 @@ const StoreSelector = (() => {
         `</span>`;
       btn.querySelector(".store-pill-name").textContent = store.name;
       btn.addEventListener("click", async () => {
+        hideStoreContextMenu();
         await openStore(store.name);
         setSidebarOpen(false);
+      });
+      btn.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showStoreContextMenu(event, {
+          name: store.name,
+          site_id: store.site_id || "",
+        });
       });
       switchEl.appendChild(btn);
     }
@@ -204,42 +252,21 @@ const StoreSelector = (() => {
 
   async function refreshStoreList() {
     const stores = await window.api.listStores();
-    const listEl = document.getElementById("store-list");
-    listEl.innerHTML = "";
-
     renderStorePills(stores);
-
-    if (stores.length === 0) {
-      const empty = document.createElement("p");
-      empty.className = "empty-hint";
-      empty.style.padding = "8px 0";
-      empty.textContent = "No stores yet — create one below.";
-      listEl.appendChild(empty);
-      populateEditStoreForm(null);
-      updateStoreToggleLabel(null);
-      return stores;
-    }
-
-    for (const store of stores) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "store-item" + (store.name === activeStore ? " active" : "");
-      btn.textContent = formatStoreLabel(store);
-      btn.addEventListener("click", async () => {
-        await openStore(store.name);
-      });
-      listEl.appendChild(btn);
+    if (!stores.length) {
+      updateStoreToggleLabel(activeStore ? activeStore : null);
     }
     return stores;
   }
 
   async function openStore(name) {
     const result = await window.api.openStore(name);
-    setActiveStoreInfo(result.name, result.site_id, result.batchCount);
+    setActiveStoreInfo(result.name, result.site_id, result.batchCount, result.dbPath);
     await refreshStoreList();
     if (onStoreChange) {
       await onStoreChange(result);
     }
+    return result;
   }
 
   async function createStore(name, siteId) {
@@ -249,13 +276,33 @@ const StoreSelector = (() => {
   }
 
   async function updateStore(name, siteId) {
+    if (editingStoreName && editingStoreName !== activeStore) {
+      await window.api.openStore(editingStoreName);
+    }
     const result = await window.api.updateStore(name, siteId);
-    setActiveStoreInfo(result.name, result.site_id, result.batchCount);
+    setActiveStoreInfo(result.name, result.site_id, result.batchCount, result.dbPath);
     await refreshStoreList();
     if (onStoreChange) {
       await onStoreChange(result);
     }
     return result;
+  }
+
+  async function deleteStore(name) {
+    const wasActive = activeStore === name;
+    await window.api.deleteStore(name);
+    const stores = await refreshStoreList();
+
+    if (!wasActive) return;
+
+    if (stores.length > 0) {
+      await openStore(stores[0].name);
+    } else {
+      clearActiveStore();
+      if (onStoreChange) {
+        await onStoreChange(null);
+      }
+    }
   }
 
   function getActiveStore() {
@@ -282,46 +329,73 @@ const StoreSelector = (() => {
       filterStoreList(e.target.value);
     });
 
-    document.getElementById("create-store-form").addEventListener("submit", async (e) => {
+    document.getElementById("add-store-btn")?.addEventListener("click", () => {
+      openStoreForm("add");
+    });
+
+    document.getElementById("store-form")?.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const nameInput = document.getElementById("new-store-name");
-      const siteInput = document.getElementById("new-store-site-id");
-      const name = nameInput.value.trim();
-      const siteId = siteInput.value.trim();
+      const name = document.getElementById("store-form-name").value.trim();
+      const siteId = document.getElementById("store-form-site-id").value.trim();
       if (!name || !siteId) return;
+
       try {
-        await createStore(name, siteId);
-        nameInput.value = "";
-        siteInput.value = "";
+        if (storeFormMode === "edit") {
+          await updateStore(name, siteId);
+        } else {
+          await createStore(name, siteId);
+        }
+        if (typeof DashboardUI !== "undefined") {
+          DashboardUI.closeModal("store-form-modal");
+        } else {
+          document.getElementById("store-form-modal").hidden = true;
+        }
+        setStoreFormStatus("");
       } catch (err) {
-        alert(err.message || "Failed to create store.");
+        setStoreFormStatus(err.message || "Failed to save store.", "error");
       }
     });
 
-    document.getElementById("edit-store-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!activeStore) {
-        setEditStoreStatus("Select a store first.", "error");
+    document.getElementById("store-context-menu")?.addEventListener("click", async (e) => {
+      const action = e.target.closest("[data-store-action]")?.dataset.storeAction;
+      if (!action || !contextStore) return;
+      const store = contextStore;
+      hideStoreContextMenu();
+
+      if (action === "edit") {
+        openStoreForm("edit", store);
         return;
       }
 
-      const name = document.getElementById("edit-store-name").value.trim();
-      const siteId = document.getElementById("edit-store-site-id").value.trim();
-      if (!name || !siteId) return;
-
-      try {
-        await updateStore(name, siteId);
-        setEditStoreStatus("Store updated.", "success");
-      } catch (err) {
-        setEditStoreStatus(err.message || "Failed to update store.", "error");
+      if (action === "delete") {
+        const ok = window.confirm(
+          `Delete store "${store.name}"?\n\nThis permanently removes its database file and cannot be undone.`
+        );
+        if (!ok) return;
+        try {
+          await deleteStore(store.name);
+        } catch (err) {
+          alert(err.message || "Failed to delete store.");
+        }
       }
     });
+
+    document.addEventListener("click", (e) => {
+      const menu = document.getElementById("store-context-menu");
+      if (!menu || menu.hidden) return;
+      if (!menu.contains(e.target)) hideStoreContextMenu();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") hideStoreContextMenu();
+    });
+    window.addEventListener("blur", hideStoreContextMenu);
+    document.addEventListener("scroll", hideStoreContextMenu, true);
 
     refreshStoreList().then(async (stores) => {
       if (stores.length > 0 && !activeStore) {
         await openStore(stores[0].name);
       } else if (!stores.length && typeof DashboardUI !== "undefined") {
-        DashboardUI.updateBrand(null);
+        DashboardUI.updateBrand(null, null, null);
       }
     });
   }

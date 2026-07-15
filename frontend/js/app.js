@@ -345,7 +345,7 @@ const App = (() => {
     if (active) {
       await ReconcileUI.onStoreOpen();
     } else {
-      DashboardUI.updateBrand(null);
+      DashboardUI.updateBrand(null, null, null);
       DashboardUI.updateGaugeFromBatches([]);
     }
   }
@@ -356,7 +356,12 @@ const App = (() => {
     const activeStore = StoreSelector.getActiveStore();
     if (activeStore) {
       const result = await window.api.openStore(activeStore);
-      StoreSelector.setActiveStoreInfo(result.name, result.site_id, result.batchCount);
+      StoreSelector.setActiveStoreInfo(
+        result.name,
+        result.site_id,
+        result.batchCount,
+        result.dbPath
+      );
     }
     await ReconcileUI.refresh();
     if (selectedInvoiceId != null) {
@@ -484,7 +489,13 @@ const App = (() => {
   async function refreshAfterBatchDeletion(batchCount, options = {}) {
     const activeStore = StoreSelector.getActiveStore();
     if (activeStore) {
-      StoreSelector.setActiveStoreInfo(activeStore, StoreSelector.getActiveSiteId(), batchCount);
+      const result = await window.api.openStore(activeStore);
+      StoreSelector.setActiveStoreInfo(
+        result.name,
+        result.site_id,
+        batchCount ?? result.batchCount,
+        result.dbPath
+      );
     }
 
     const preserveGroup = options.preserveGroup || null;
@@ -606,8 +617,25 @@ const App = (() => {
     });
   }
 
+  async function onStorageLocationChanged() {
+    const previousStore = StoreSelector.getActiveStore();
+    const stores = await StoreSelector.refreshStoreList();
+
+    if (previousStore && stores.some((store) => store.name === previousStore)) {
+      await StoreSelector.openStore(previousStore);
+      return;
+    }
+
+    if (stores.length > 0) {
+      await StoreSelector.openStore(stores[0].name);
+      return;
+    }
+
+    await onStoreChange();
+  }
+
   function init() {
-    DashboardUI.init();
+    DashboardUI.init({ onStorageLocationChanged });
     initBatchLineSelection();
     initInvoiceLineSelection();
     StoreSelector.init({ onStoreChange });
