@@ -23,13 +23,11 @@
         </div>
       </div>
       <div class="spacer"></div>
-      <div class="store-switch" id="store-switch" role="tablist" aria-label="Stores"></div>
-      <button type="button" class="btn-ghost" id="manage-stores-btn">
+      <button type="button" class="btn-ghost store-toggle" id="store-sidebar-toggle" aria-expanded="false" aria-controls="store-sidebar">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 15.5a3.5 3.5 0 100-7 3.5 3.5 0 000 7z" stroke="currentColor" stroke-width="1.8"/>
-          <path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9c.3.6.9 1 1.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          <path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        Manage
+        <span id="store-toggle-label">Stores</span>
       </button>
       <button type="button" class="btn-ghost" id="add-pdf-btn">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -38,6 +36,31 @@
         Add PDF
       </button>
     </div>
+
+    <div class="store-sidebar-backdrop" id="store-sidebar-backdrop" hidden></div>
+    <aside class="store-sidebar" id="store-sidebar" aria-label="Stores" hidden>
+      <div class="store-sidebar-head">
+        <div>
+          <h2>Stores</h2>
+          <p id="store-sidebar-count">0 stores</p>
+        </div>
+        <button type="button" class="btn-ghost btn-compact" id="store-sidebar-close" aria-label="Close store list">Close</button>
+      </div>
+      <div class="store-sidebar-search">
+        <label class="sr-only" for="store-search-input">Filter stores</label>
+        <input type="search" id="store-search-input" placeholder="Filter stores…" autocomplete="off">
+      </div>
+      <nav class="store-sidebar-nav" id="store-switch" role="listbox" aria-label="Store list"></nav>
+      <div class="store-sidebar-foot">
+        <button type="button" class="btn-ghost" id="manage-stores-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 15.5a3.5 3.5 0 100-7 3.5 3.5 0 000 7z" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9c.3.6.9 1 1.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+          Manage stores
+        </button>
+      </div>
+    </aside>
 
     <p id="active-store" class="sr-only">No store selected</p>
     <span id="batch-count-badge" class="sr-only" aria-hidden="true">0</span>
@@ -198,27 +221,6 @@
               </table>
             </div>
           </div>
-          <div id="batch-search-open-lines" class="batch-search-section">
-            <h4 class="reconcile-subheading">
-              Open invoice lines
-              <span id="batch-search-open-lines-count" class="badge">0</span>
-            </h4>
-            <div class="table-wrap">
-              <table id="batch-search-open-lines-table">
-                <thead>
-                  <tr>
-                    <th>Invoice #</th>
-                    <th>Invoice Line ID</th>
-                    <th>Batch #</th>
-                    <th>Date</th>
-                    <th class="num">Amount</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
           <div id="batch-search-reconciled" class="batch-search-section">
             <h4 class="reconcile-subheading">
               Reconciled matches
@@ -299,7 +301,7 @@
           <div class="recon-controls-head">
             <div>
               <h3>Open reconciliation</h3>
-              <p class="section-hint">Focus on credit batches: reconcile to preview matches, then Confirm to archive them. Use batch # search to inspect invoice lines.</p>
+              <p class="section-hint">Focus on credit batches: reconcile to preview matches, then Confirm to archive them. Use batch # search to inspect open and reconciled batches.</p>
             </div>
             <div class="reconcile-controls">
               <button type="button" id="manual-batch-btn" class="btn-ghost" disabled>Add batch</button>

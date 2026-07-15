@@ -2,6 +2,7 @@ const StoreSelector = (() => {
   let activeStore = null;
   let activeSiteId = null;
   let onStoreChange = null;
+  let sidebarOpen = false;
 
   function formatMoney(value) {
     return Number(value).toLocaleString("en-US", {
@@ -69,6 +70,82 @@ const StoreSelector = (() => {
     setEditStoreStatus("");
   }
 
+  function updateStoreToggleLabel(name) {
+    const label = document.getElementById("store-toggle-label");
+    if (!label) return;
+    label.textContent = name || "Stores";
+  }
+
+  function updateStoreCount(count) {
+    const el = document.getElementById("store-sidebar-count");
+    if (!el) return;
+    el.textContent = count === 1 ? "1 store" : `${count} stores`;
+  }
+
+  function setSidebarOpen(open) {
+    sidebarOpen = Boolean(open);
+    const sidebar = document.getElementById("store-sidebar");
+    const backdrop = document.getElementById("store-sidebar-backdrop");
+    const toggle = document.getElementById("store-sidebar-toggle");
+    if (!sidebar) return;
+
+    if (sidebarOpen) {
+      sidebar.hidden = false;
+      if (backdrop) backdrop.hidden = false;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          sidebar.classList.add("open");
+          backdrop?.classList.add("open");
+        });
+      });
+      toggle?.setAttribute("aria-expanded", "true");
+      const search = document.getElementById("store-search-input");
+      if (search) {
+        search.value = "";
+        filterStoreList("");
+        search.focus();
+      }
+    } else {
+      sidebar.classList.remove("open");
+      backdrop?.classList.remove("open");
+      toggle?.setAttribute("aria-expanded", "false");
+      const finish = () => {
+        if (!sidebarOpen) {
+          sidebar.hidden = true;
+          if (backdrop) backdrop.hidden = true;
+        }
+      };
+      sidebar.addEventListener("transitionend", finish, { once: true });
+      setTimeout(finish, 280);
+    }
+  }
+
+  function filterStoreList(query) {
+    const q = String(query || "").trim().toLowerCase();
+    const nav = document.getElementById("store-switch");
+    if (!nav) return;
+    let visible = 0;
+    nav.querySelectorAll(".store-pill[data-store-name]").forEach((btn) => {
+      const name = (btn.dataset.storeName || "").toLowerCase();
+      const site = (btn.dataset.storeSite || "").toLowerCase();
+      const match = !q || name.includes(q) || site.includes(q);
+      btn.hidden = !match;
+      if (match) visible += 1;
+    });
+    let empty = nav.querySelector(".store-sidebar-empty.filter-empty");
+    if (q && visible === 0) {
+      if (!empty) {
+        empty = document.createElement("p");
+        empty.className = "store-sidebar-empty filter-empty";
+        nav.appendChild(empty);
+      }
+      empty.textContent = "No stores match that filter.";
+      empty.hidden = false;
+    } else if (empty) {
+      empty.hidden = true;
+    }
+  }
+
   function setActiveStoreInfo(name, siteId, batchCount) {
     activeStore = name;
     activeSiteId = siteId || null;
@@ -76,6 +153,7 @@ const StoreSelector = (() => {
     document.getElementById("active-store").textContent =
       `Active: ${name}${siteLabel} (${batchCount} batches)`;
     document.getElementById("batch-count-badge").textContent = String(batchCount);
+    updateStoreToggleLabel(name);
     populateEditStoreForm(name, siteId);
     if (typeof DashboardUI !== "undefined") {
       DashboardUI.updateBrand(name, siteId);
@@ -86,12 +164,12 @@ const StoreSelector = (() => {
     const switchEl = document.getElementById("store-switch");
     if (!switchEl) return;
     switchEl.innerHTML = "";
+    updateStoreCount(stores.length);
 
     if (!stores.length) {
-      const empty = document.createElement("span");
-      empty.className = "store-pill";
-      empty.style.cursor = "default";
-      empty.textContent = "No stores";
+      const empty = document.createElement("p");
+      empty.className = "store-sidebar-empty";
+      empty.textContent = "No stores yet — use Manage to add one.";
       switchEl.appendChild(empty);
       return;
     }
@@ -99,11 +177,29 @@ const StoreSelector = (() => {
     for (const store of stores) {
       const btn = document.createElement("button");
       btn.type = "button";
+      btn.setAttribute("role", "option");
       btn.className = "store-pill" + (store.name === activeStore ? " active" : "");
-      btn.innerHTML = `<span class="dot"></span>${store.name}`;
-      btn.addEventListener("click", () => openStore(store.name));
+      btn.dataset.storeName = store.name;
+      btn.dataset.storeSite = store.site_id || "";
+      btn.setAttribute("aria-selected", String(store.name === activeStore));
+      const meta = store.site_id
+        ? `<span class="store-pill-meta">SITE ${store.site_id}</span>`
+        : "";
+      btn.innerHTML =
+        `<span class="dot"></span>` +
+        `<span class="store-pill-text">` +
+        `<span class="store-pill-name"></span>${meta}` +
+        `</span>`;
+      btn.querySelector(".store-pill-name").textContent = store.name;
+      btn.addEventListener("click", async () => {
+        await openStore(store.name);
+        setSidebarOpen(false);
+      });
       switchEl.appendChild(btn);
     }
+
+    const search = document.getElementById("store-search-input");
+    if (search?.value) filterStoreList(search.value);
   }
 
   async function refreshStoreList() {
@@ -120,6 +216,7 @@ const StoreSelector = (() => {
       empty.textContent = "No stores yet — create one below.";
       listEl.appendChild(empty);
       populateEditStoreForm(null);
+      updateStoreToggleLabel(null);
       return stores;
     }
 
@@ -171,6 +268,19 @@ const StoreSelector = (() => {
 
   function init(handlers) {
     onStoreChange = handlers.onStoreChange;
+
+    document.getElementById("store-sidebar-toggle")?.addEventListener("click", () => {
+      setSidebarOpen(!sidebarOpen);
+    });
+    document.getElementById("store-sidebar-close")?.addEventListener("click", () => {
+      setSidebarOpen(false);
+    });
+    document.getElementById("store-sidebar-backdrop")?.addEventListener("click", () => {
+      setSidebarOpen(false);
+    });
+    document.getElementById("store-search-input")?.addEventListener("input", (e) => {
+      filterStoreList(e.target.value);
+    });
 
     document.getElementById("create-store-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -224,6 +334,7 @@ const StoreSelector = (() => {
     setActiveStoreInfo,
     getActiveStore,
     getActiveSiteId,
+    setSidebarOpen,
     formatMoney,
     formatDate,
     formatDateTime,

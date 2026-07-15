@@ -233,7 +233,10 @@ const DashboardUI = (() => {
       tab.addEventListener("click", () => showPanel(tab.dataset.panel));
     });
 
-    $("manage-stores-btn")?.addEventListener("click", () => openModal("manage-stores-modal"));
+    $("manage-stores-btn")?.addEventListener("click", () => {
+      if (typeof StoreSelector !== "undefined") StoreSelector.setSidebarOpen(false);
+      openModal("manage-stores-modal");
+    });
     $("add-pdf-btn")?.addEventListener("click", () => {
       setIngestPanel("chevron");
       openModal("add-pdf-modal");
@@ -252,6 +255,7 @@ const DashboardUI = (() => {
       if (!$("add-pdf-modal")?.hidden) closeAddPdfModal();
       else if (!$("manual-batch-modal")?.hidden) closeModal("manual-batch-modal");
       else if (!$("manage-stores-modal")?.hidden) closeModal("manage-stores-modal");
+      else if (typeof StoreSelector !== "undefined") StoreSelector.setSidebarOpen(false);
     });
 
     document.querySelectorAll("#add-pdf-modal .modal-tabs .tab").forEach((tab) => {
