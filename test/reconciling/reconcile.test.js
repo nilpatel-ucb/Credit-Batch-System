@@ -138,7 +138,8 @@ function testSignedInvoiceAmountMatchesPositiveNet() {
 }
 
 function testDuplicateBatchNumberNetsAllRowsRegardlessOfDate() {
-  // Two Chevron rows same number, different days, only one EFT credit → under-credited.
+  // Two Chevron rows same number, different days, only one EFT credit →
+  // exact row matches; the other stays missing from invoice.
   const batches = [
     {
       id: 10,
@@ -178,10 +179,14 @@ function testDuplicateBatchNumberNetsAllRowsRegardlessOfDate() {
     scopedBatches: batches,
   });
 
-  assert.strictEqual(result.batchGroups[0].status, "mismatch");
-  assert.strictEqual(result.batchGroups[0].batchNetTotal, 2000);
-  assert.strictEqual(result.batchGroups[0].batches.length, 2);
-  assert.strictEqual(result.missingBatches.length, 0);
+  assert.strictEqual(result.batchGroups.length, 1);
+  assert.strictEqual(result.batchGroups[0].status, "matched");
+  assert.strictEqual(result.batchGroups[0].batches.length, 1);
+  assert.strictEqual(result.batchGroups[0].batch.id, 10);
+  assert.strictEqual(result.missingBatches.length, 1);
+  assert.strictEqual(result.missingBatches[0].batch.id, 11);
+  assert.strictEqual(result.summary.totalMissingCredit, 1000);
+  assert.strictEqual(result.summary.creditDiscrepancy, 1000);
 }
 
 function testDifferentDaySameBatchNumberNetsTogether() {
@@ -330,10 +335,12 @@ function testSameDayDuplicateBatchesUnderCreditedWhenOnlyOneSidePaid() {
     scopedBatches: batches,
   });
 
-  assert.strictEqual(result.batchGroups[0].status, "mismatch");
-  assert.strictEqual(result.batchGroups[0].batchNetTotal, 2000);
-  assert.strictEqual(result.summary.matchedCount, 0);
-  assert.strictEqual(result.summary.mismatchCount, 2);
+  assert.strictEqual(result.batchGroups[0].status, "matched");
+  assert.strictEqual(result.batchGroups[0].batchNetTotal, 1000);
+  assert.strictEqual(result.summary.matchedCount, 1);
+  assert.strictEqual(result.summary.mismatchCount, 0);
+  assert.strictEqual(result.missingBatches.length, 1);
+  assert.strictEqual(result.summary.totalMissingCredit, 1000);
 }
 
 function testCreditDiscrepancyEqualsTotalMissingCredit() {
@@ -658,6 +665,59 @@ function testNetMismatchWhenUnderCredited() {
   assert.strictEqual(result.batchGroups[0].netEft, -900);
   assert.strictEqual(result.matchedPairs.length, 0);
   assert.strictEqual(result.summary.mismatchCount, 1);
+  assert.strictEqual(result.summary.totalMissingCredit, 100);
+}
+
+function testPartialBatchCreditCountsShortfallOnly() {
+  // Real shape: one batch number, two Chevron rows; only part of the credit arrived.
+  // Exact row is matched; uncredited row is missing from invoice.
+  const result = reconcile({
+    invoice: {
+      id: 1,
+      invoice_number: "X",
+      invoice_total: 105.25,
+      period_start: "2026-03-28",
+      period_end: "2026-03-30",
+    },
+    lines: [
+      {
+        id: 1,
+        invoice_line_id: "AA9147",
+        batch_number: "9147",
+        amount: -105.25,
+        inv_date: "2026-03-30",
+      },
+    ],
+    scopedBatches: [
+      {
+        id: 1,
+        batch_date: "2026-03-28",
+        batch_number: "9147",
+        gross_amount: 110,
+        total_fee: 4.75,
+        net_amount: 105.25,
+      },
+      {
+        id: 2,
+        batch_date: "2026-03-29",
+        batch_number: "9147",
+        gross_amount: 230,
+        total_fee: 8.86,
+        net_amount: 221.14,
+      },
+    ],
+  });
+
+  assert.strictEqual(result.batchGroups.length, 1);
+  assert.strictEqual(result.batchGroups[0].status, "matched");
+  assert.strictEqual(result.batchGroups[0].batches.length, 1);
+  assert.strictEqual(result.batchGroups[0].batch.net_amount, 105.25);
+  assert.strictEqual(result.missingBatches.length, 1);
+  assert.strictEqual(result.missingBatches[0].batch.net_amount, 221.14);
+  assert.strictEqual(result.summary.mismatchCount, 0);
+  assert.strictEqual(result.summary.missingFromInvoiceCount, 1);
+  assert.strictEqual(result.summary.totalMissingCredit, 221.14);
+  assert.strictEqual(result.summary.creditDiscrepancy, 221.14);
 }
 
 function testMismatchCannotStealExactMatch() {
@@ -768,6 +828,7 @@ function run() {
   testNetZeroMarksReversed();
   testOverCreditedWhenDuplicateCreditsWithoutReversal();
   testNetMismatchWhenUnderCredited();
+  testPartialBatchCreditCountsShortfallOnly();
   testMismatchCannotStealExactMatch();
   testMismatchNetsAllBatchesWithSameNumber();
   testAmountMismatchIsFlaggedSeparately();

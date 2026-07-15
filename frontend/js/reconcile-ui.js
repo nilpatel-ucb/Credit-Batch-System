@@ -112,10 +112,10 @@ const ReconcileUI = (() => {
   }
 
   function missingCreditValue(summary, batches = scopeBatches) {
-    if (batches && batches.length > 0) {
-      return sumMissingFromInvoiceCredit(batches);
+    if (summary != null && summary.totalMissingCredit != null) {
+      return Number(summary.totalMissingCredit);
     }
-    return Number(summary?.totalMissingCredit || 0);
+    return sumMissingFromInvoiceCredit(batches);
   }
 
   function setStatus(message, type = "info") {

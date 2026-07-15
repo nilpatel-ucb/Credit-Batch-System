@@ -1,4 +1,8 @@
-const { reconcile, BATCH_MATCH_STATUS } = require("./reconcile");
+const {
+  reconcile,
+  BATCH_MATCH_STATUS,
+  sumMismatchShortfall,
+} = require("./reconcile");
 
 function round2(value) {
   return Math.round(Number(value) * 100) / 100;
@@ -267,7 +271,8 @@ function adjustResultForExpected(result, expectedBatchIds, promoteExpected) {
   }
 
   const totalMissingCredit = round2(
-    trueMissing.reduce((sum, entry) => sum + Number(entry.batch.net_amount), 0)
+    trueMissing.reduce((sum, entry) => sum + Number(entry.batch.net_amount), 0) +
+      sumMismatchShortfall(result.batchGroups)
   );
 
   return {

@@ -649,14 +649,74 @@ function testTotalMissingCreditCountsOnlyMissingFromInvoice() {
   manager.insertInvoice(summary, batchLines, "eft.pdf");
 
   const reconciliation = manager.getStoreReconciliation();
-  assert.strictEqual(reconciliation.summary.totalMissingCredit, 2578.36);
+  // Missing batch 0341 (2578.36) + mismatch shortfall on 0319 (2817.73 - 2700 = 117.73)
+  assert.strictEqual(reconciliation.summary.totalMissingCredit, 2696.09);
   assert.strictEqual(reconciliation.summary.missingFromInvoiceCount, 1);
+  assert.strictEqual(reconciliation.summary.mismatchCount, 1);
 
   const byNumber = Object.fromEntries(
     manager.getBatches().map((batch) => [batch.batch_number, batch])
   );
   assert.strictEqual(byNumber["0319"].match_status, "mismatch");
   assert.strictEqual(byNumber["0341"].match_status, "missing_from_invoice");
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function testMismatchShortfallOnlyInTotalMissingCredit() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+
+  manager.insertBatches(
+    [
+      {
+        site_id: "309359",
+        batch_date: "2026-03-28",
+        batch_number: "9147",
+        gross_amount: 110,
+        total_fee: 4.75,
+        net_amount: 105.25,
+      },
+      {
+        site_id: "309359",
+        batch_date: "2026-03-29",
+        batch_number: "9147",
+        gross_amount: 230,
+        total_fee: 8.86,
+        net_amount: 221.14,
+      },
+    ],
+    "chevron.pdf"
+  );
+
+  manager.insertInvoice(
+    { invoiceNumber: "0600914", amount: 105.25, balance: 0 },
+    [
+      {
+        invoiceId: "AA9147",
+        batchNumber: "9147",
+        amount: -105.25,
+        invDate: "2026-03-30",
+      },
+    ],
+    "eft.pdf"
+  );
+
+  const batches = manager.getBatches();
+  assert.strictEqual(batches.length, 2);
+  const byNet = Object.fromEntries(batches.map((batch) => [String(batch.net_amount), batch]));
+  assert.strictEqual(byNet["105.25"].match_status, "matched");
+  assert.strictEqual(byNet["221.14"].match_status, "missing_from_invoice");
+
+  const reconciliation = manager.getStoreReconciliation();
+  assert.strictEqual(reconciliation.summary.matchedCount, 1);
+  assert.strictEqual(reconciliation.summary.mismatchCount, 0);
+  assert.strictEqual(reconciliation.summary.missingFromInvoiceCount, 1);
+  assert.strictEqual(reconciliation.summary.totalMissingCredit, 221.14);
 
   manager.close();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -804,6 +864,7 @@ function run() {
   testBatchIngestAfterInvoiceAutoReconciles();
   testBatchIngestWithoutInvoicesLeavesBatchesUnmatched();
   testTotalMissingCreditCountsOnlyMissingFromInvoice();
+  testMismatchShortfallOnlyInTotalMissingCredit();
   testDeleteInvoiceClearsMissingFromInvoiceFlags();
   testExpectedOnNextInvoiceExcludedUntilNewEft();
   console.log("PASS store tests");

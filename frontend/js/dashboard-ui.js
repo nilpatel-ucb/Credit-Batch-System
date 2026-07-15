@@ -92,13 +92,13 @@ const DashboardUI = (() => {
     });
   }
 
-  function drawGauge(received, missing, pending) {
-    const total = received + missing + pending || 1;
+  function drawGauge(received, missing, expected) {
+    const total = received + missing + expected || 1;
     const gap = 6;
     const segs = [
       { el: $("arc-green"), v: received },
       { el: $("arc-red"), v: missing },
-      { el: $("arc-slate"), v: pending },
+      { el: $("arc-slate"), v: expected },
     ].filter((s) => s.v > 0);
 
     ["arc-green", "arc-red", "arc-slate"].forEach((id) => {
@@ -141,29 +141,49 @@ const DashboardUI = (() => {
     if (r) r.textContent = String(recons);
   }
 
-  function updateGaugeFromBatches(batches) {
+  function updateGaugeFromBatches(batches, summary) {
     let received = 0;
     let missing = 0;
-    let pending = 0;
+    let expected = 0;
     let matchedLike = 0;
+    let mismatchNet = 0;
+    let missingFromInvoiceNet = 0;
 
     (batches || []).forEach((batch) => {
       const net = Number(batch.net_amount) || 0;
       const status = batch.match_status || "unmatched";
-      if (status === "matched" || status === "mismatch" || status === "over_credited") {
+      if (status === "matched" || status === "over_credited") {
         received += net;
         matchedLike += 1;
-      } else if (status === "missing_from_invoice" || status === "reversed") {
+      } else if (status === "mismatch") {
+        mismatchNet += net;
+        matchedLike += 1;
+      } else if (status === "expected_on_next_invoice") {
+        expected += net;
+      } else if (status === "missing_from_invoice") {
+        missingFromInvoiceNet += net;
         missing += net;
       } else {
-        pending += net;
+        // unmatched, reversed, and other unsettled statuses count as missing
+        missing += net;
       }
     });
 
-    drawGauge(received, missing, pending);
+    // Prefer reconciliation shortfall math: only uncredited mismatch amount is missing.
+    let mismatchShortfall = 0;
+    if (summary && summary.totalMissingCredit != null) {
+      mismatchShortfall = Math.max(
+        0,
+        Math.round((Number(summary.totalMissingCredit) - missingFromInvoiceNet) * 100) / 100
+      );
+    }
+    received += Math.max(0, Math.round((mismatchNet - mismatchShortfall) * 100) / 100);
+    missing += mismatchShortfall;
+
+    drawGauge(received, missing, expected);
     $("leg-received").textContent = usd(received);
     $("leg-missing").textContent = usd(missing);
-    $("leg-pending").textContent = usd(pending);
+    $("leg-pending").textContent = usd(expected);
 
     const dates = (batches || []).map((b) => b.batch_date).filter(Boolean).sort();
     if (dates.length) {

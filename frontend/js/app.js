@@ -180,11 +180,14 @@ const App = (() => {
       return;
     }
 
-    const batches = await window.api.getBatches();
+    const [batches, lastRecon] = await Promise.all([
+      window.api.getBatches(),
+      window.api.getLastReconciliation(),
+    ]);
     cachedBatches = batches;
     document.getElementById("batch-count-badge").textContent = String(batches.length);
     cachedBatchGroups = groupBatches(batches);
-    DashboardUI.updateGaugeFromBatches(batches);
+    DashboardUI.updateGaugeFromBatches(batches, lastRecon?.summary);
     if (meta) {
       meta.textContent = `${batches.length} rows · ${activeStore}.db`;
     }

@@ -81,6 +81,55 @@ function pickBatchesForNumber(candidates) {
   });
 }
 
+/**
+ * When EFT credit is less than the full cluster, prefer rows whose nets
+ * exactly equal the credited amount (or an exact subset). Unmatched rows
+ * stay unused and become missing_from_invoice.
+ */
+function findExactCreditSubset(batches, targetAmount) {
+  const target = round2(Number(targetAmount));
+  if (target <= 0 || !batches || batches.length === 0) {
+    return null;
+  }
+
+  const sorted = pickBatchesForNumber(batches);
+  const exactSingles = sorted.filter((batch) => round2(Number(batch.net_amount)) === target);
+  if (exactSingles.length > 0) {
+    return [exactSingles[0]];
+  }
+
+  let best = null;
+  const chosen = [];
+
+  function dfs(start, remaining) {
+    if (round2(remaining) === 0) {
+      if (!best || chosen.length < best.length) {
+        best = [...chosen];
+      }
+      return;
+    }
+    if (remaining < 0 || start >= sorted.length) {
+      return;
+    }
+    if (best && chosen.length >= best.length) {
+      return;
+    }
+
+    for (let i = start; i < sorted.length; i += 1) {
+      const net = round2(Number(sorted[i].net_amount));
+      chosen.push(sorted[i]);
+      dfs(i + 1, round2(remaining - net));
+      chosen.pop();
+      if (best && best.length === 1) {
+        return;
+      }
+    }
+  }
+
+  dfs(0, target);
+  return best;
+}
+
 function classifyNetMatch(netEft, batchNetAmount, lineCount, batchCount = 1) {
   const net = round2(Number(netEft));
   const batchNet = round2(Number(batchNetAmount));
@@ -122,6 +171,31 @@ function classifyNetMatch(netEft, batchNetAmount, lineCount, batchCount = 1) {
   };
 }
 
+/** Under-credited mismatch shortfall only — never the already-received credit. */
+function computeMismatchShortfall(batchNetTotal, netEft) {
+  const batchNet = round2(Number(batchNetTotal) || 0);
+  const net = round2(Number(netEft) || 0);
+  if (batchNet <= 0) {
+    return 0;
+  }
+  if (net >= 0) {
+    return batchNet;
+  }
+  return round2(Math.max(0, batchNet - Math.abs(net)));
+}
+
+function sumMismatchShortfall(batchGroups) {
+  return round2(
+    (batchGroups || [])
+      .filter((group) => group.status === BATCH_MATCH_STATUS.MISMATCH)
+      .reduce(
+        (sum, group) =>
+          sum + computeMismatchShortfall(group.batchNetTotal, group.netEft),
+        0
+      )
+  );
+}
+
 function buildSummary(
   invoiceTotal,
   scopedBatches,
@@ -135,7 +209,8 @@ function buildSummary(
   const totalDeposit = matchedBatches.reduce((sum, batch) => sum + Number(batch.gross_amount), 0);
   const totalFee = matchedBatches.reduce((sum, batch) => sum + Number(batch.total_fee), 0);
   const totalCredit = matchedBatches.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
-  const totalMissingCredit = missingBatches.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
+  const missingBatchCredit = missingBatches.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
+  const totalMissingCredit = round2(missingBatchCredit + sumMismatchShortfall(batchGroups));
   const normalizedInvoiceTotal = round2(Number(invoiceTotal || 0));
 
   const unmatchedLineCount = unmatchedLineGroups.reduce((sum, group) => sum + group.lines.length, 0);
@@ -162,8 +237,8 @@ function buildSummary(
     totalFee: round2(totalFee),
     totalCredit: round2(totalCredit),
     invoiceTotal: normalizedInvoiceTotal,
-    creditDiscrepancy: round2(totalMissingCredit),
-    totalMissingCredit: round2(totalMissingCredit),
+    creditDiscrepancy: totalMissingCredit,
+    totalMissingCredit,
   };
 }
 
@@ -257,12 +332,42 @@ function reconcile({ invoice, invoiceTotal, lines, scopedBatches, matchableBatch
 
     const cluster = pickBatchesForNumber(candidates);
     const batchNetTotal = computeBatchNetTotal(cluster);
-    const { status, message } = classifyNetMatch(
+    const classification = classifyNetMatch(
       netEft,
       batchNetTotal,
       groupLines.length,
       cluster.length
     );
+
+    // Under-credited multi-row batch #: match an exact credit subset; leave the rest missing.
+    const absCredit = round2(Math.abs(netEft));
+    if (
+      classification.status === BATCH_MATCH_STATUS.MISMATCH &&
+      netEft < 0 &&
+      absCredit < batchNetTotal &&
+      cluster.length > 1
+    ) {
+      const matchedSubset = findExactCreditSubset(cluster, absCredit);
+      if (matchedSubset && matchedSubset.length > 0) {
+        for (const batch of matchedSubset) {
+          usedBatchIds.add(batch.id);
+        }
+        batchGroups.push({
+          batch: matchedSubset[0],
+          batches: matchedSubset,
+          batchNetTotal: computeBatchNetTotal(matchedSubset),
+          lines: groupLines,
+          netEft,
+          status: BATCH_MATCH_STATUS.MATCHED,
+          message: `Net EFT credit ${absCredit} matches ${
+            matchedSubset.length === 1 ? "batch net" : `${matchedSubset.length} batch nets totaling`
+          } ${absCredit} across ${
+            groupLines.length === 1 ? "1 invoice line" : `${groupLines.length} invoice lines`
+          }.`,
+        });
+        continue;
+      }
+    }
 
     for (const batch of cluster) {
       usedBatchIds.add(batch.id);
@@ -274,8 +379,8 @@ function reconcile({ invoice, invoiceTotal, lines, scopedBatches, matchableBatch
       batchNetTotal,
       lines: groupLines,
       netEft,
-      status,
-      message,
+      status: classification.status,
+      message: classification.message,
     });
   }
 
@@ -318,7 +423,10 @@ module.exports = {
   expandReconcilePeriod,
   computeNetEft,
   computeBatchNetTotal,
+  computeMismatchShortfall,
+  sumMismatchShortfall,
   pickBatchesForNumber,
+  findExactCreditSubset,
   classifyNetMatch,
   BATCH_MATCH_STATUS,
   RECONCILE_DATE_BUFFER_DAYS,

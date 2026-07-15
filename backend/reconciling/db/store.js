@@ -4,6 +4,29 @@ const Database = require("better-sqlite3");
 const { migrate } = require("./migrations");
 const Normalize = require("../../parsing/normalize");
 const { runStoreReconciliation, resetStoreReconciliationState } = require("../reconcile-service");
+const { computeMismatchShortfall } = require("../reconcile");
+
+function computePersistedMismatchShortfall(mismatchBatches, lines) {
+  const groups = new Map();
+  for (const batch of mismatchBatches) {
+    const key = Normalize.stripLeadingZeros(batch.batch_number);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(batch);
+  }
+
+  let shortfall = 0;
+  for (const [, group] of groups) {
+    const batchNetTotal = group.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
+    const batchIds = new Set(group.map((batch) => batch.id));
+    const netEft = lines
+      .filter((line) => batchIds.has(line.batch_id))
+      .reduce((sum, line) => sum + Number(line.amount), 0);
+    shortfall += computeMismatchShortfall(batchNetTotal, netEft);
+  }
+  return Math.round(shortfall * 100) / 100;
+}
 
 function sanitizeStoreName(name) {
   const trimmed = String(name || "").trim();
@@ -910,7 +933,13 @@ function createStoreManager(storesDir) {
     const overCreditedBatches = batches.filter((batch) => batch.match_status === "over_credited");
     const mismatchBatches = batches.filter((batch) => batch.match_status === "mismatch");
     // Expected-on-next-invoice is excluded from missing credit until the next EFT.
-    const totalMissingCredit = missingBatches.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
+    // Amount-mismatch contributes shortfall only (batch nets − |invoice credit|).
+    const missingBatchCredit = missingBatches.reduce(
+      (sum, batch) => sum + Number(batch.net_amount),
+      0
+    );
+    const mismatchShortfall = computePersistedMismatchShortfall(mismatchBatches, lines);
+    const totalMissingCredit = Math.round((missingBatchCredit + mismatchShortfall) * 100) / 100;
     const matchedCount = matched.length;
     const totalDeposit = matched.reduce((sum, row) => sum + Number(row.grossAmount), 0);
     const totalFee = matched.reduce((sum, row) => sum + Number(row.totalFee), 0);
