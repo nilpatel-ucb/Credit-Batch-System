@@ -78,6 +78,10 @@ function registerIpcHandlers() {
     storeManager.deleteInvoice(invoiceId)
   );
 
+  ipcMain.handle("invoices:delete-line", (_event, lineId) =>
+    storeManager.deleteInvoiceLine(lineId)
+  );
+
   ipcMain.handle("reconcile:run", () => storeManager.reconcileStore());
 
   ipcMain.handle("reconcile:last", () => storeManager.getStoreReconciliation());

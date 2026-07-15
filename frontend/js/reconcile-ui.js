@@ -2,6 +2,7 @@ const ReconcileUI = (() => {
   let storeOpen = false;
   let onReconcileComplete = null;
   let onManualBatchAdded = null;
+  let onDataDeleted = null;
   let scopeBatches = [];
   let scopeLines = [];
   let batchSearchQuery = "";
@@ -9,6 +10,7 @@ const ReconcileUI = (() => {
   let pendingConfirmCount = 0;
   let expandedRunId = null;
   let netTouched = false;
+  let contextTarget = null;
 
   function formatMatchStatus(status) {
     switch (status) {
@@ -622,7 +624,7 @@ const ReconcileUI = (() => {
             typeof DashboardUI !== "undefined"
               ? DashboardUI.statusPill(batch.match_status)
               : ["pill-unmatched", formatMatchStatus(batch.match_status)];
-          return `<tr class="${batchRowStatusClass(batch.match_status)}">
+          return `<tr class="recon-row ${batchRowStatusClass(batch.match_status)}" data-recon-kind="batch" data-batch-id="${batch.id}" data-batch-number="${batch.batch_number}" data-batch-date="${batch.batch_date}">
           <td class="mono">${StoreSelector.formatDate(batch.batch_date)}</td>
           <td class="mono">${StoreSelector.stripLeadingZeros(batch.batch_number)}</td>
           <td class="num">${StoreSelector.formatMoney(batch.net_amount)}</td>
@@ -650,7 +652,7 @@ const ReconcileUI = (() => {
             typeof DashboardUI !== "undefined"
               ? DashboardUI.statusPill(line.match_status)
               : ["pill-unmatched", formatMatchStatus(line.match_status)];
-          return `<tr class="${lineRowStatusClass(line.match_status)}">
+          return `<tr class="recon-row ${lineRowStatusClass(line.match_status)}" data-recon-kind="invoice-line" data-line-id="${line.id}" data-invoice-number="${line.invoice_number || ""}" data-invoice-line-id="${line.invoice_line_id}" data-batch-number="${line.batch_number}" data-line-date="${line.inv_date}">
           <td class="mono">${line.invoice_number || ""}</td>
           <td class="mono">${line.invoice_line_id}</td>
           <td class="mono">${StoreSelector.stripLeadingZeros(line.batch_number)}</td>
@@ -661,6 +663,123 @@ const ReconcileUI = (() => {
         }
       )
       .join("");
+  }
+
+  function hideContextMenu() {
+    const menu = document.getElementById("reconcile-context-menu");
+    if (!menu) return;
+    menu.hidden = true;
+    contextTarget = null;
+  }
+
+  function showContextMenu(event, row) {
+    const menu = document.getElementById("reconcile-context-menu");
+    if (!menu) return;
+
+    contextTarget = {
+      kind: row.dataset.reconKind,
+      batchId: row.dataset.batchId ? Number(row.dataset.batchId) : null,
+      batchNumber: row.dataset.batchNumber || "",
+      batchDate: row.dataset.batchDate || "",
+      lineId: row.dataset.lineId ? Number(row.dataset.lineId) : null,
+      invoiceNumber: row.dataset.invoiceNumber || "",
+      invoiceLineId: row.dataset.invoiceLineId || "",
+      lineBatchNumber: row.dataset.batchNumber || "",
+      lineDate: row.dataset.lineDate || "",
+    };
+
+    menu.hidden = false;
+    const pad = 8;
+    const { width, height } = menu.getBoundingClientRect();
+    const left = Math.min(event.clientX, window.innerWidth - width - pad);
+    const top = Math.min(event.clientY, window.innerHeight - height - pad);
+    menu.style.left = `${Math.max(pad, left)}px`;
+    menu.style.top = `${Math.max(pad, top)}px`;
+  }
+
+  async function deleteContextTarget() {
+    const target = contextTarget;
+    hideContextMenu();
+    if (!target || !storeOpen) return;
+
+    if (target.kind === "batch") {
+      const label = `batch ${StoreSelector.stripLeadingZeros(target.batchNumber)} on ${StoreSelector.formatDate(target.batchDate)}`;
+      const confirmed = window.confirm(`Delete ${label}? This cannot be undone.`);
+      if (!confirmed) return;
+
+      try {
+        const result = await window.api.deleteBatch(target.batchId);
+        if (onDataDeleted) {
+          await onDataDeleted(result);
+        } else {
+          await refresh();
+        }
+        if (result?.reconciliation) {
+          render(result.reconciliation);
+        }
+        setStatus(`Deleted ${label}.`, "success");
+      } catch (err) {
+        setStatus(err.message || "Failed to delete batch.", "error");
+      }
+      return;
+    }
+
+    if (target.kind === "invoice-line") {
+      const label = `invoice line ${target.invoiceLineId} (invoice ${target.invoiceNumber || "—"}, batch #${StoreSelector.stripLeadingZeros(target.lineBatchNumber)})`;
+      const confirmed = window.confirm(
+        `Delete ${label}? If it is the last line, the invoice header is removed too. This cannot be undone.`
+      );
+      if (!confirmed) return;
+
+      try {
+        const result = await window.api.deleteInvoiceLine(target.lineId);
+        const suffix = result.invoiceDeleted ? " Invoice removed (no lines left)." : "";
+        if (onDataDeleted) {
+          await onDataDeleted(result);
+        } else {
+          await refresh();
+        }
+        if (result?.reconciliation) {
+          render(result.reconciliation);
+        }
+        setStatus(`Deleted ${label}.${suffix}`, "success");
+      } catch (err) {
+        setStatus(err.message || "Failed to delete invoice line.", "error");
+      }
+    }
+  }
+
+  function initContextMenu() {
+    const batchesTable = document.getElementById("reconcile-batches-table");
+    const linesTable = document.getElementById("reconcile-lines-table");
+    const menu = document.getElementById("reconcile-context-menu");
+
+    const onRowContextMenu = (event) => {
+      const row = event.target.closest("tr.recon-row");
+      if (!row || !storeOpen) return;
+      event.preventDefault();
+      showContextMenu(event, row);
+    };
+
+    batchesTable?.addEventListener("contextmenu", onRowContextMenu);
+    linesTable?.addEventListener("contextmenu", onRowContextMenu);
+
+    menu?.querySelector('[data-context-action="delete"]')?.addEventListener("click", () => {
+      deleteContextTarget();
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!menu || menu.hidden) return;
+      if (menu.contains(event.target)) return;
+      hideContextMenu();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") hideContextMenu();
+    });
+
+    window.addEventListener("blur", hideContextMenu);
+    document.addEventListener("scroll", hideContextMenu, true);
   }
 
   function renderScope(scope) {
@@ -957,6 +1076,7 @@ const ReconcileUI = (() => {
   function init(handlers) {
     onReconcileComplete = handlers.onReconcileComplete;
     onManualBatchAdded = handlers.onManualBatchAdded || null;
+    onDataDeleted = handlers.onDataDeleted || null;
 
     document.getElementById("reconcile-run-btn").addEventListener("click", async () => {
       await runReconciliation();
@@ -991,6 +1111,7 @@ const ReconcileUI = (() => {
       searchInput.focus();
     });
 
+    initContextMenu();
     resetView();
   }
 

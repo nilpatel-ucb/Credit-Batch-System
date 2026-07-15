@@ -794,6 +794,55 @@ th.num,
   flex-wrap: wrap;
 }
 
+.recon-row {
+  cursor: context-menu;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 1200;
+  min-width: 148px;
+  padding: 4px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-2);
+}
+
+.context-menu[hidden] {
+  display: none !important;
+}
+
+.context-menu-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.context-menu-item:hover,
+.context-menu-item:focus-visible {
+  outline: none;
+  background: var(--slate-soft);
+}
+
+.context-menu-item.danger {
+  color: var(--red);
+}
+
+.context-menu-item.danger:hover,
+.context-menu-item.danger:focus-visible {
+  background: var(--red-soft);
+}
+
 .manual-batch-form {
   display: flex;
   flex-direction: column;

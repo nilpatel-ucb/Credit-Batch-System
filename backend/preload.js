@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("api", {
   getInvoices: () => ipcRenderer.invoke("invoices:list"),
   getInvoiceLines: (invoiceId) => ipcRenderer.invoke("invoices:lines", invoiceId),
   deleteInvoice: (invoiceId) => ipcRenderer.invoke("invoices:delete", invoiceId),
+  deleteInvoiceLine: (lineId) => ipcRenderer.invoke("invoices:delete-line", lineId),
   reconcileStore: () => ipcRenderer.invoke("reconcile:run"),
   getLastReconciliation: () => ipcRenderer.invoke("reconcile:last"),
   getReconciliationScope: () => ipcRenderer.invoke("reconcile:scope"),

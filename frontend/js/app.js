@@ -371,6 +371,19 @@ const App = (() => {
     }
   }
 
+  async function onReconcileDataDeleted(result) {
+    if (result?.invoiceDeleted && result.invoiceId === selectedInvoiceId) {
+      clearInvoiceLinesPanel();
+    }
+
+    await refreshAfterBatchChange();
+    if (result?.reconciliation) {
+      ReconcileUI.render(result.reconciliation);
+    } else {
+      DashboardUI.updateHeroFromResult(null);
+    }
+  }
+
   async function onInvoiceIngestComplete(result) {
     if (result && result.invoiceId) {
       DashboardUI.closeAddPdfModal();
@@ -588,7 +601,11 @@ const App = (() => {
     StoreSelector.init({ onStoreChange });
     BatchIngestUI.init({ onIngestComplete: onBatchIngestComplete });
     InvoiceIngestUI.init({ onIngestComplete: onInvoiceIngestComplete });
-    ReconcileUI.init({ onReconcileComplete, onManualBatchAdded });
+    ReconcileUI.init({
+      onReconcileComplete,
+      onManualBatchAdded,
+      onDataDeleted: onReconcileDataDeleted,
+    });
   }
 
   return { init };

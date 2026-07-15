@@ -667,6 +667,83 @@ function createStoreManager(storesDir) {
     };
   }
 
+  function deleteInvoiceLine(lineId) {
+    const database = requireDb();
+    const id = Number(lineId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error("A valid invoice line ID is required.");
+    }
+
+    const line = database
+      .prepare(
+        `SELECT l.id, l.invoice_id, l.invoice_line_id, l.batch_number, l.amount,
+                l.inv_date, l.batch_id, i.invoice_number
+         FROM invoice_lines l
+         JOIN invoices i ON i.id = l.invoice_id
+         WHERE l.id = ?`
+      )
+      .get(id);
+
+    if (!line) {
+      throw new Error("Invoice line not found.");
+    }
+
+    let invoiceDeleted = false;
+
+    const run = database.transaction(() => {
+      if (line.batch_id) {
+        database
+          .prepare(
+            `UPDATE batches
+             SET match_status = 'unmatched',
+                 invoice_line_id = NULL,
+                 invoice_amount = NULL,
+                 last_reconciled_at = NULL,
+                 reconciliation_run_id = NULL
+             WHERE id = ?`
+          )
+          .run(line.batch_id);
+      }
+
+      database.prepare(`DELETE FROM invoice_lines WHERE id = ?`).run(id);
+
+      const remaining = database
+        .prepare(
+          `SELECT COUNT(*) AS c, COALESCE(SUM(amount), 0) AS total
+           FROM invoice_lines
+           WHERE invoice_id = ?`
+        )
+        .get(line.invoice_id);
+
+      if (remaining.c === 0) {
+        database.prepare(`DELETE FROM invoices WHERE id = ?`).run(line.invoice_id);
+        invoiceDeleted = true;
+      } else {
+        database
+          .prepare(`UPDATE invoices SET invoice_total = ? WHERE id = ?`)
+          .run(Number(remaining.total), line.invoice_id);
+      }
+
+      pruneEmptyReconciliationRuns(database);
+    });
+
+    run();
+
+    const reconciliation = resyncReconciliation();
+
+    return {
+      lineId: line.id,
+      invoiceId: line.invoice_id,
+      invoiceNumber: line.invoice_number,
+      invoiceLineId: line.invoice_line_id,
+      batchNumber: line.batch_number,
+      amount: line.amount,
+      invoiceDeleted,
+      invoiceCount: database.prepare(`SELECT COUNT(*) AS c FROM invoices`).get().c,
+      reconciliation,
+    };
+  }
+
   function getInvoiceForReconcile(invoiceId) {
     return requireDb()
       .prepare(
@@ -1141,6 +1218,7 @@ function createStoreManager(storesDir) {
     getInvoiceLines,
     getAllInvoiceLines,
     deleteInvoice,
+    deleteInvoiceLine,
     getInvoiceForReconcile,
     getBatchesInPeriod,
     getReconciliationScope,

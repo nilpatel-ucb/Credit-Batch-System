@@ -485,6 +485,61 @@ function testDeleteInvoiceRemovesHeaderLinesAndResetsLinkedBatches() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+function testDeleteInvoiceLineRemovesLineAndUnlinksBatch() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+  manager.insertBatches(
+    [
+      {
+        site_id: "309359",
+        batch_date: "2026-03-30",
+        batch_number: "0319",
+        gross_amount: 2900,
+        total_fee: 82.27,
+        net_amount: 2817.73,
+      },
+    ],
+    "chevron.pdf"
+  );
+
+  const { summary, batchLines } = sampleInvoicePayload();
+  const insertResult = manager.insertInvoice(summary, batchLines, "eft.pdf");
+  const matchedBatch = manager.getBatches().find((batch) => batch.batch_number === "0319");
+  assert.strictEqual(matchedBatch.match_status, "matched");
+
+  const lines = manager.getInvoiceLines(insertResult.invoiceId);
+  const matchedLine = lines.find((line) => line.invoice_line_id === "AAE0319");
+  assert.ok(matchedLine);
+
+  const deleted = manager.deleteInvoiceLine(matchedLine.id);
+  assert.strictEqual(deleted.invoiceLineId, "AAE0319");
+  assert.strictEqual(deleted.invoiceDeleted, false);
+  assert.strictEqual(deleted.invoiceCount, 1);
+
+  const remaining = manager.getInvoiceLines(insertResult.invoiceId);
+  assert.strictEqual(remaining.length, 1);
+  assert.strictEqual(remaining[0].invoice_line_id, "AAU9086");
+
+  const invoice = manager.getInvoices()[0];
+  assert.strictEqual(invoice.invoice_total, -1500);
+
+  const resetBatch = manager.getBatches()[0];
+  assert.strictEqual(resetBatch.match_status, "missing_from_invoice");
+  assert.strictEqual(resetBatch.invoice_line_id, null);
+
+  const lastLine = manager.deleteInvoiceLine(remaining[0].id);
+  assert.strictEqual(lastLine.invoiceDeleted, true);
+  assert.strictEqual(lastLine.invoiceCount, 0);
+  assert.strictEqual(manager.getInvoices().length, 0);
+  assert.strictEqual(manager.getBatches()[0].match_status, "unmatched");
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 function testBatchIngestAfterInvoiceAutoReconciles() {
   const dir = makeTempStoresDir();
   const manager = createStoreManager(dir);
@@ -662,6 +717,7 @@ function run() {
   testDeleteMatchedBatchClearsInvoiceLineLink();
   testDeleteBatchSourceRemovesEntireUpload();
   testDeleteInvoiceRemovesHeaderLinesAndResetsLinkedBatches();
+  testDeleteInvoiceLineRemovesLineAndUnlinksBatch();
   testBatchIngestAfterInvoiceAutoReconciles();
   testBatchIngestWithoutInvoicesLeavesBatchesUnmatched();
   testTotalMissingCreditCountsOnlyMissingFromInvoice();
