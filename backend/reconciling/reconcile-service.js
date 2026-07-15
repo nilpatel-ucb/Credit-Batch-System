@@ -29,6 +29,20 @@ function buildExceptions(result) {
     });
   }
 
+  for (const { batch, message } of result.expectedOnNextInvoiceBatches || []) {
+    exceptions.push({
+      type: BATCH_MATCH_STATUS.EXPECTED_ON_NEXT_INVOICE,
+      batchId: batch.id,
+      batchDate: batch.batch_date,
+      batchNumber: batch.batch_number,
+      netAmount: batch.net_amount,
+      netEft: null,
+      invoiceLineId: null,
+      invoiceAmount: null,
+      message,
+    });
+  }
+
   for (const group of result.batchGroups || []) {
     if (group.status === BATCH_MATCH_STATUS.MATCHED) {
       continue;
@@ -154,7 +168,7 @@ function resetStoreReconciliationState(database) {
     .run();
 }
 
-function applyReconciliation(database, result, runAt) {
+function applyReconciliation(database, result, runAt, { expectedBatchIds = new Set(), promoteExpected = false } = {}) {
   const updateBatch = database.prepare(
     `UPDATE batches
      SET match_status = @match_status,
@@ -197,9 +211,12 @@ function applyReconciliation(database, result, runAt) {
     }
 
     for (const { batch } of result.missingBatches) {
+      const keepExpected = !promoteExpected && expectedBatchIds.has(batch.id);
       updateBatch.run({
         id: batch.id,
-        match_status: "missing_from_invoice",
+        match_status: keepExpected
+          ? BATCH_MATCH_STATUS.EXPECTED_ON_NEXT_INVOICE
+          : BATCH_MATCH_STATUS.MISSING,
         invoice_line_id: null,
         invoice_amount: null,
         last_reconciled_at: runAt,
@@ -230,7 +247,53 @@ function applyReconciliation(database, result, runAt) {
   run();
 }
 
-function runStoreReconciliation(database, loaders) {
+function adjustResultForExpected(result, expectedBatchIds, promoteExpected) {
+  if (promoteExpected || expectedBatchIds.size === 0) {
+    return result;
+  }
+
+  const expectedMissing = [];
+  const trueMissing = [];
+  for (const entry of result.missingBatches) {
+    if (expectedBatchIds.has(entry.batch.id)) {
+      expectedMissing.push(entry.batch);
+    } else {
+      trueMissing.push(entry);
+    }
+  }
+
+  if (expectedMissing.length === 0) {
+    return result;
+  }
+
+  const totalMissingCredit = round2(
+    trueMissing.reduce((sum, entry) => sum + Number(entry.batch.net_amount), 0)
+  );
+
+  return {
+    ...result,
+    missingBatches: trueMissing,
+    expectedOnNextInvoiceBatches: expectedMissing.map((batch) => ({
+      batch,
+      message: "Marked as expected on next invoice.",
+    })),
+    summary: {
+      ...result.summary,
+      missingFromInvoiceCount: trueMissing.length,
+      creditDiscrepancy: totalMissingCredit,
+      totalMissingCredit,
+    },
+  };
+}
+
+/**
+ * @param {{ promoteExpected?: boolean }} [options]
+ *   promoteExpected — when true (new EFT upload), batches previously tagged
+ *   expected_on_next_invoice that still have no line become missing_from_invoice.
+ *   Otherwise those tags are preserved and excluded from missing credit.
+ */
+function runStoreReconciliation(database, loaders, options = {}) {
+  const promoteExpected = Boolean(options.promoteExpected);
   const allBatches = loaders.getBatches();
   const allLines = loaders.getAllInvoiceLines();
   const openBatches = allBatches.filter(isOpenRow);
@@ -238,17 +301,23 @@ function runStoreReconciliation(database, loaders) {
   const invoices = loaders.getInvoices();
   const invoiceTotal = invoices.reduce((sum, invoice) => sum + Number(invoice.invoice_total), 0);
   const runAt = new Date().toISOString();
+  const expectedBatchIds = new Set(
+    openBatches
+      .filter((batch) => batch.match_status === BATCH_MATCH_STATUS.EXPECTED_ON_NEXT_INVOICE)
+      .map((batch) => batch.id)
+  );
 
   resetStoreReconciliationState(database);
 
-  const result = reconcile({
+  const rawResult = reconcile({
     invoiceTotal,
     lines: openLines,
     scopedBatches: openBatches,
     matchableBatches: openBatches,
   });
 
-  applyReconciliation(database, result, runAt);
+  applyReconciliation(database, rawResult, runAt, { expectedBatchIds, promoteExpected });
+  const result = adjustResultForExpected(rawResult, expectedBatchIds, promoteExpected);
   return formatStoreReconciliationResult(result, runAt, invoices.length);
 }
 

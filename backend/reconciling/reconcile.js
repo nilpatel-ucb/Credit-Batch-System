@@ -5,6 +5,7 @@ const RECONCILE_DATE_BUFFER_DAYS = 7;
 const BATCH_MATCH_STATUS = {
   MATCHED: "matched",
   MISSING: "missing_from_invoice",
+  EXPECTED_ON_NEXT_INVOICE: "expected_on_next_invoice",
   REVERSED: "reversed",
   OVER_CREDITED: "over_credited",
   MISMATCH: "mismatch",

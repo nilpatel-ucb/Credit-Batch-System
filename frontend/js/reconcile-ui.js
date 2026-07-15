@@ -11,6 +11,7 @@ const ReconcileUI = (() => {
   let expandedRunId = null;
   let netTouched = false;
   let contextTarget = null;
+  let statusTagTarget = null;
 
   function formatMatchStatus(status) {
     switch (status) {
@@ -18,6 +19,8 @@ const ReconcileUI = (() => {
         return "Matched";
       case "missing_from_invoice":
         return "Missing from invoice";
+      case "expected_on_next_invoice":
+        return "Expected on next invoice";
       case "reversed":
         return "Reversed (net zero)";
       case "over_credited":
@@ -35,6 +38,7 @@ const ReconcileUI = (() => {
   function isProblemBatchStatus(status) {
     return (
       status === "missing_from_invoice" ||
+      status === "expected_on_next_invoice" ||
       status === "reversed" ||
       status === "over_credited" ||
       status === "mismatch" ||
@@ -70,6 +74,7 @@ const ReconcileUI = (() => {
       case "matched":
         return "row-reconcile-matched";
       case "missing_from_invoice":
+      case "expected_on_next_invoice":
       case "reversed":
       case "over_credited":
       case "mismatch":
@@ -346,6 +351,27 @@ const ReconcileUI = (() => {
     return formatMatchStatus(status);
   }
 
+  function isEditableStatusTag(status) {
+    return status === "missing_from_invoice" || status === "expected_on_next_invoice";
+  }
+
+  function batchStatusPillHtml(batch) {
+    const status = batch.match_status || "unmatched";
+    const [pillClass, pillLabel] =
+      typeof DashboardUI !== "undefined"
+        ? DashboardUI.statusPill(status)
+        : ["pill-unmatched", formatMatchStatus(status)];
+
+    if (!isEditableStatusTag(status)) {
+      return `<span class="pill ${pillClass}">${pillLabel}</span>`;
+    }
+
+    return `<button type="button" class="pill pill-tag ${pillClass}" data-status-tag-trigger="1" data-batch-id="${batch.id}" data-batch-number="${batch.batch_number}" data-batch-date="${batch.batch_date}" data-match-status="${status}" aria-haspopup="menu" aria-expanded="false" title="Change status tag">
+      <span>${pillLabel}</span>
+      <span class="pill-tag-caret" aria-hidden="true"></span>
+    </button>`;
+  }
+
   function renderOpenBatchSearchResults(batches, query) {
     const countEl = document.getElementById("batch-search-open-batches-count");
     const tbody = document.querySelector("#batch-search-open-batches-table tbody");
@@ -364,11 +390,11 @@ const ReconcileUI = (() => {
 
     tbody.innerHTML = sortBatches(batches)
       .map(
-        (batch) => `<tr class="recon-row ${batchRowStatusClass(batch.match_status)}" data-recon-kind="batch" data-batch-id="${batch.id}" data-batch-number="${batch.batch_number}" data-batch-date="${batch.batch_date}">
+        (batch) => `<tr class="recon-row ${batchRowStatusClass(batch.match_status)}" data-recon-kind="batch" data-batch-id="${batch.id}" data-batch-number="${batch.batch_number}" data-batch-date="${batch.batch_date}" data-match-status="${batch.match_status}">
           <td class="mono">${StoreSelector.formatDate(batch.batch_date)}</td>
           <td class="mono">${StoreSelector.stripLeadingZeros(batch.batch_number)}</td>
           <td class="num">${StoreSelector.formatMoney(batch.net_amount)}</td>
-          <td>${statusPillHtml(batch.match_status)}</td>
+          <td>${batchStatusPillHtml(batch)}</td>
           <td class="mono" style="color:var(--ink-3);font-size:11.5px">${
             batch.source_pdf || "—"
           }</td>
@@ -614,18 +640,12 @@ const ReconcileUI = (() => {
 
     tbody.innerHTML = sortBatches(batches)
       .map(
-        (batch) => {
-          const [pillClass, pillLabel] =
-            typeof DashboardUI !== "undefined"
-              ? DashboardUI.statusPill(batch.match_status)
-              : ["pill-unmatched", formatMatchStatus(batch.match_status)];
-          return `<tr class="recon-row ${batchRowStatusClass(batch.match_status)}" data-recon-kind="batch" data-batch-id="${batch.id}" data-batch-number="${batch.batch_number}" data-batch-date="${batch.batch_date}">
+        (batch) => `<tr class="recon-row ${batchRowStatusClass(batch.match_status)}" data-recon-kind="batch" data-batch-id="${batch.id}" data-batch-number="${batch.batch_number}" data-batch-date="${batch.batch_date}" data-match-status="${batch.match_status}">
           <td class="mono">${StoreSelector.formatDate(batch.batch_date)}</td>
           <td class="mono">${StoreSelector.stripLeadingZeros(batch.batch_number)}</td>
           <td class="num">${StoreSelector.formatMoney(batch.net_amount)}</td>
-          <td><span class="pill ${pillClass}">${pillLabel}</span></td>
-        </tr>`;
-        }
+          <td>${batchStatusPillHtml(batch)}</td>
+        </tr>`
       )
       .join("");
   }
@@ -637,9 +657,20 @@ const ReconcileUI = (() => {
     contextTarget = null;
   }
 
+  function hideStatusTagMenu() {
+    const menu = document.getElementById("reconcile-status-tag-menu");
+    if (menu) menu.hidden = true;
+    document.querySelectorAll("[data-status-tag-trigger][aria-expanded='true']").forEach((el) => {
+      el.setAttribute("aria-expanded", "false");
+    });
+    statusTagTarget = null;
+  }
+
   function showContextMenu(event, row) {
     const menu = document.getElementById("reconcile-context-menu");
     if (!menu) return;
+
+    hideStatusTagMenu();
 
     contextTarget = {
       kind: row.dataset.reconKind,
@@ -660,6 +691,100 @@ const ReconcileUI = (() => {
     const top = Math.min(event.clientY, window.innerHeight - height - pad);
     menu.style.left = `${Math.max(pad, left)}px`;
     menu.style.top = `${Math.max(pad, top)}px`;
+  }
+
+  function showStatusTagMenu(anchor) {
+    const menu = document.getElementById("reconcile-status-tag-menu");
+    if (!menu || !storeOpen) return;
+
+    hideContextMenu();
+
+    const currentStatus = anchor.dataset.matchStatus || "";
+    statusTagTarget = {
+      batchId: Number(anchor.dataset.batchId),
+      batchNumber: anchor.dataset.batchNumber || "",
+      batchDate: anchor.dataset.batchDate || "",
+      matchStatus: currentStatus,
+      anchor,
+    };
+
+    menu.querySelectorAll(".status-tag-option").forEach((btn) => {
+      const active = btn.dataset.status === currentStatus;
+      btn.classList.toggle("is-active", active);
+    });
+
+    document.querySelectorAll("[data-status-tag-trigger][aria-expanded='true']").forEach((el) => {
+      if (el !== anchor) el.setAttribute("aria-expanded", "false");
+    });
+    anchor.setAttribute("aria-expanded", "true");
+
+    menu.hidden = false;
+    // Measure after paint so display:none → visible has real dimensions.
+    requestAnimationFrame(() => {
+      if (menu.hidden || !statusTagTarget || statusTagTarget.anchor !== anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const pad = 8;
+      const { width, height } = menu.getBoundingClientRect();
+      let left = rect.left;
+      let top = rect.bottom + 4;
+      if (left + width > window.innerWidth - pad) {
+        left = window.innerWidth - width - pad;
+      }
+      if (top + height > window.innerHeight - pad) {
+        top = Math.max(pad, rect.top - height - 4);
+      }
+      menu.style.left = `${Math.max(pad, left)}px`;
+      menu.style.top = `${Math.max(pad, top)}px`;
+    });
+  }
+
+  function patchLocalBatchStatus(batchId, matchStatus) {
+    scopeBatches = scopeBatches.map((batch) =>
+      Number(batch.id) === Number(batchId) ? { ...batch, match_status: matchStatus } : batch
+    );
+    renderFilteredScope();
+  }
+
+  async function applyStatusTag(nextStatus) {
+    const target = statusTagTarget;
+    hideStatusTagMenu();
+    if (!target || !storeOpen) return;
+    if (nextStatus === target.matchStatus) return;
+    if (nextStatus !== "missing_from_invoice" && nextStatus !== "expected_on_next_invoice") {
+      return;
+    }
+
+    if (typeof window.api?.setBatchExpectedOnNextInvoice !== "function") {
+      setStatus("Restart the app to enable status tag changes.", "error");
+      return;
+    }
+
+    const wantExpected = nextStatus === "expected_on_next_invoice";
+    const label = `batch ${StoreSelector.stripLeadingZeros(target.batchNumber)} on ${StoreSelector.formatDate(target.batchDate)}`;
+    try {
+      const result = await window.api.setBatchExpectedOnNextInvoice(target.batchId, wantExpected);
+      const newStatus = result?.matchStatus || nextStatus;
+      patchLocalBatchStatus(target.batchId, newStatus);
+
+      if (onDataDeleted) {
+        await onDataDeleted(result);
+      } else {
+        await refresh();
+        if (result?.reconciliation) {
+          render(result.reconciliation);
+        }
+      }
+
+      setStatus(
+        wantExpected
+          ? `Marked ${label} as expected on next invoice.`
+          : `Set ${label} back to missing from invoice.`,
+        "success"
+      );
+    } catch (err) {
+      setStatus(err.message || "Failed to update status tag.", "error");
+      await refresh();
+    }
   }
 
   async function deleteContextTarget() {
@@ -719,8 +844,10 @@ const ReconcileUI = (() => {
     const searchBatchesTable = document.getElementById("batch-search-open-batches-table");
     const searchLinesTable = document.getElementById("batch-search-open-lines-table");
     const menu = document.getElementById("reconcile-context-menu");
+    const tagMenu = document.getElementById("reconcile-status-tag-menu");
 
     const onRowContextMenu = (event) => {
+      if (event.target.closest("[data-status-tag-trigger]")) return;
       const row = event.target.closest("tr.recon-row");
       if (!row || !storeOpen) return;
       event.preventDefault();
@@ -731,22 +858,52 @@ const ReconcileUI = (() => {
     searchBatchesTable?.addEventListener("contextmenu", onRowContextMenu);
     searchLinesTable?.addEventListener("contextmenu", onRowContextMenu);
 
+    // Document-level so Batches tab and Reconcile tab both work.
+    document.addEventListener("click", (event) => {
+      const trigger = event.target.closest("[data-status-tag-trigger]");
+      if (trigger) {
+        if (!storeOpen) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (trigger.getAttribute("aria-expanded") === "true") {
+          hideStatusTagMenu();
+        } else {
+          showStatusTagMenu(trigger);
+        }
+        return;
+      }
+
+      if (menu && !menu.hidden && !menu.contains(event.target)) {
+        hideContextMenu();
+      }
+      if (tagMenu && !tagMenu.hidden && !tagMenu.contains(event.target)) {
+        hideStatusTagMenu();
+      }
+    });
+
+    // pointerdown so the choice applies before any click-outside close race.
+    tagMenu?.addEventListener("pointerdown", (event) => {
+      const option = event.target.closest(".status-tag-option");
+      if (!option) return;
+      event.preventDefault();
+      event.stopPropagation();
+      applyStatusTag(option.dataset.status);
+    });
+
     menu?.querySelector('[data-context-action="delete"]')?.addEventListener("click", () => {
       deleteContextTarget();
     });
 
-    document.addEventListener("click", (event) => {
-      if (!menu || menu.hidden) return;
-      if (menu.contains(event.target)) return;
-      hideContextMenu();
-    });
-
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") hideContextMenu();
+      if (event.key !== "Escape") return;
+      hideContextMenu();
+      hideStatusTagMenu();
     });
 
-    window.addEventListener("blur", hideContextMenu);
-    document.addEventListener("scroll", hideContextMenu, true);
+    window.addEventListener("blur", () => {
+      hideContextMenu();
+      hideStatusTagMenu();
+    });
   }
 
   function renderScope(scope) {
@@ -1096,5 +1253,6 @@ const ReconcileUI = (() => {
     confirmReconciliation,
     render,
     refresh,
+    batchStatusPillHtml,
   };
 })();

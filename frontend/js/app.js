@@ -212,13 +212,17 @@ const App = (() => {
         lastDate = b.batch_date;
         const [cls, label] = DashboardUI.statusPill(b.match_status);
         const groupIndex = findGroupIndexForBatch(b);
+        const statusCell =
+          typeof ReconcileUI !== "undefined" && ReconcileUI.batchStatusPillHtml
+            ? ReconcileUI.batchStatusPillHtml(b)
+            : `<span class="pill ${cls}">${label}</span>`;
         return `<tr class="batch-row" data-batch-id="${b.id}" data-batch-group-index="${groupIndex}">
           <td class="mono">${showDate}</td>
           <td class="mono">${StoreSelector.stripLeadingZeros(b.batch_number)}</td>
           <td class="num">${StoreSelector.formatMoney(b.gross_amount)}</td>
           <td class="num">${StoreSelector.formatMoney(b.total_fee)}</td>
           <td class="num">${StoreSelector.formatMoney(b.net_amount)}</td>
-          <td><span class="pill ${cls}">${label}</span></td>
+          <td>${statusCell}</td>
           <td class="mono">${b.invoice_line_id || "—"}</td>
           <td class="num">${
             b.invoice_amount != null ? StoreSelector.formatMoney(b.invoice_amount) : "—"
@@ -564,6 +568,11 @@ const App = (() => {
           deleteBtn.dataset.batchNumber,
           deleteBtn.dataset.batchDate
         );
+        return;
+      }
+
+      // Let the shared status-tag handler open the dropdown; skip row select only.
+      if (event.target.closest("[data-status-tag-trigger]")) {
         return;
       }
 

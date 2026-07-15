@@ -412,6 +412,17 @@
     <button type="button" class="context-menu-item danger" data-context-action="delete" role="menuitem">Delete</button>
   </div>
 
+  <div id="reconcile-status-tag-menu" class="status-tag-menu" hidden role="menu">
+    <button type="button" class="status-tag-option" data-status="missing_from_invoice" role="menuitem">
+      <span class="status-tag-check" aria-hidden="true"></span>
+      Missing from invoice
+    </button>
+    <button type="button" class="status-tag-option" data-status="expected_on_next_invoice" role="menuitem">
+      <span class="status-tag-check" aria-hidden="true"></span>
+      Expected on next invoice
+    </button>
+  </div>
+
   <!-- Manual credit batch modal -->
   <div class="modal" id="manual-batch-modal" hidden>
     <div class="modal-backdrop" data-close-modal="manual-batch-modal"></div>

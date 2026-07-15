@@ -586,7 +586,8 @@ function createStoreManager(storesDir) {
 
     run();
 
-    const reconciliation = reconcileStore();
+    // New EFT: promote any "expected on next invoice" tags that still lack a line.
+    const reconciliation = reconcileStore({ promoteExpected: true });
 
     return {
       invoiceId,
@@ -783,13 +784,78 @@ function createStoreManager(storesDir) {
     return getAllInvoiceLines().filter((line) => line.reconciliation_run_id == null);
   }
 
-  function reconcileStore() {
+  function reconcileStore(options = {}) {
     const database = requireDb();
-    return runStoreReconciliation(database, {
-      getBatches,
-      getAllInvoiceLines,
-      getInvoices,
-    });
+    return runStoreReconciliation(
+      database,
+      {
+        getBatches,
+        getAllInvoiceLines,
+        getInvoices,
+      },
+      options
+    );
+  }
+
+  /**
+   * Manually tag (or clear) an open batch as expected on the next EFT.
+   * Open batches only; matched / archived rows are rejected.
+   */
+  function setBatchExpectedOnNextInvoice(batchId, expected) {
+    const database = requireDb();
+    const id = Number(batchId);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error("A valid batch ID is required.");
+    }
+
+    const batch = database
+      .prepare(
+        `SELECT id, batch_date, batch_number, net_amount, match_status, reconciliation_run_id
+         FROM batches
+         WHERE id = ?`
+      )
+      .get(id);
+
+    if (!batch) {
+      throw new Error("Batch not found.");
+    }
+
+    if (batch.reconciliation_run_id != null) {
+      throw new Error("Confirmed batches cannot be marked expected on next invoice.");
+    }
+
+    const openStatuses = new Set([
+      "unmatched",
+      "missing_from_invoice",
+      "expected_on_next_invoice",
+    ]);
+    if (!openStatuses.has(batch.match_status)) {
+      throw new Error(
+        `Only open unmatched or missing batches can be marked expected (got ${batch.match_status}).`
+      );
+    }
+
+    const wantExpected = Boolean(expected);
+    let nextStatus;
+    if (wantExpected) {
+      nextStatus = "expected_on_next_invoice";
+    } else {
+      const invoiceCount = database.prepare("SELECT COUNT(*) AS c FROM invoices").get().c;
+      nextStatus = invoiceCount > 0 ? "missing_from_invoice" : "unmatched";
+    }
+
+    database
+      .prepare(`UPDATE batches SET match_status = ? WHERE id = ? AND reconciliation_run_id IS NULL`)
+      .run(nextStatus, id);
+
+    return {
+      id: batch.id,
+      batchDate: batch.batch_date,
+      batchNumber: batch.batch_number,
+      netAmount: batch.net_amount,
+      matchStatus: nextStatus,
+      reconciliation: getStoreReconciliation(),
+    };
   }
 
   function buildWorkingReconciliation(batches, lines, invoices) {
@@ -837,9 +903,13 @@ function createStoreManager(storesDir) {
     }
 
     const missingBatches = batches.filter((batch) => batch.match_status === "missing_from_invoice");
+    const expectedOnNextInvoiceBatches = batches.filter(
+      (batch) => batch.match_status === "expected_on_next_invoice"
+    );
     const reversedBatches = batches.filter((batch) => batch.match_status === "reversed");
     const overCreditedBatches = batches.filter((batch) => batch.match_status === "over_credited");
     const mismatchBatches = batches.filter((batch) => batch.match_status === "mismatch");
+    // Expected-on-next-invoice is excluded from missing credit until the next EFT.
     const totalMissingCredit = missingBatches.reduce((sum, batch) => sum + Number(batch.net_amount), 0);
     const matchedCount = matched.length;
     const totalDeposit = matched.reduce((sum, row) => sum + Number(row.grossAmount), 0);
@@ -859,6 +929,19 @@ function createStoreManager(storesDir) {
         invoiceLineId: null,
         invoiceAmount: null,
         message: "Batch has no matching invoice line.",
+      });
+    }
+
+    for (const batch of expectedOnNextInvoiceBatches) {
+      exceptions.push({
+        type: "expected_on_next_invoice",
+        batchId: batch.id,
+        batchDate: batch.batch_date,
+        batchNumber: batch.batch_number,
+        netAmount: batch.net_amount,
+        invoiceLineId: null,
+        invoiceAmount: null,
+        message: "Marked as expected on next invoice.",
       });
     }
 
@@ -1210,6 +1293,7 @@ function createStoreManager(storesDir) {
     getBatchCount,
     deleteBatch,
     deleteBatchSource,
+    setBatchExpectedOnNextInvoice,
     getStoreInfo,
     updateStore,
     insertBatches,

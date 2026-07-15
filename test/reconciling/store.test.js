@@ -701,6 +701,89 @@ function testDeleteInvoiceClearsMissingFromInvoiceFlags() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+function testExpectedOnNextInvoiceExcludedUntilNewEft() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore("Sunset", "309359");
+  manager.openStore("Sunset");
+
+  manager.insertBatches(
+    [
+      {
+        site_id: "309359",
+        batch_date: "2026-03-31",
+        batch_number: "0341",
+        gross_amount: 2643.8,
+        total_fee: 65.44,
+        net_amount: 2578.36,
+      },
+      {
+        site_id: "309359",
+        batch_date: "2026-04-01",
+        batch_number: "0999",
+        gross_amount: 1100,
+        total_fee: 20,
+        net_amount: 1080,
+      },
+    ],
+    "chevron.pdf"
+  );
+
+  const { summary, batchLines } = sampleInvoicePayload();
+  manager.insertInvoice(summary, batchLines, "eft-1.pdf");
+
+  const byNumber = Object.fromEntries(
+    manager.getBatches().map((batch) => [batch.batch_number, batch])
+  );
+  assert.strictEqual(byNumber["0341"].match_status, "missing_from_invoice");
+  assert.strictEqual(byNumber["0999"].match_status, "missing_from_invoice");
+
+  manager.setBatchExpectedOnNextInvoice(byNumber["0999"].id, true);
+
+  let expected = manager.getBatches().find((batch) => batch.batch_number === "0999");
+  assert.strictEqual(expected.match_status, "expected_on_next_invoice");
+
+  const working = manager.getStoreReconciliation();
+  assert.strictEqual(working.summary.totalMissingCredit, 2578.36);
+  assert.strictEqual(working.summary.missingFromInvoiceCount, 1);
+  assert.ok(
+    working.exceptions.some(
+      (row) => row.type === "expected_on_next_invoice" && row.batchNumber === "0999"
+    )
+  );
+
+  // Manual re-reconcile must preserve the tag and keep it out of missing credit.
+  const manual = manager.reconcileStore();
+  assert.strictEqual(manual.summary.totalMissingCredit, 2578.36);
+  expected = manager.getBatches().find((batch) => batch.batch_number === "0999");
+  assert.strictEqual(expected.match_status, "expected_on_next_invoice");
+
+  // New EFT with no line for 0999 promotes expected → missing.
+  manager.insertInvoice(
+    { invoiceNumber: "0600999", amount: 1500, balance: 0 },
+    [
+      {
+        invoiceId: "AAE9086",
+        batchNumber: "9086",
+        amount: -1500,
+        invDate: "2026-04-02",
+      },
+    ],
+    "eft-2.pdf"
+  );
+
+  expected = manager.getBatches().find((batch) => batch.batch_number === "0999");
+  assert.strictEqual(expected.match_status, "missing_from_invoice");
+
+  const afterEft = manager.getStoreReconciliation();
+  assert.strictEqual(afterEft.summary.totalMissingCredit, 2578.36 + 1080);
+  assert.strictEqual(afterEft.summary.missingFromInvoiceCount, 2);
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 function run() {
   testCreateInsertAndCount();
   testDedupeOnInsert();
@@ -722,6 +805,7 @@ function run() {
   testBatchIngestWithoutInvoicesLeavesBatchesUnmatched();
   testTotalMissingCreditCountsOnlyMissingFromInvoice();
   testDeleteInvoiceClearsMissingFromInvoiceFlags();
+  testExpectedOnNextInvoiceExcludedUntilNewEft();
   console.log("PASS store tests");
 }
 

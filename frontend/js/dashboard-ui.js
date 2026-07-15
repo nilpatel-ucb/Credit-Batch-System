@@ -25,6 +25,8 @@ const DashboardUI = (() => {
         return ["pill-matched", "Matched"];
       case "missing_from_invoice":
         return ["pill-missing", "Missing from invoice"];
+      case "expected_on_next_invoice":
+        return ["pill-expected", "Expected on next invoice"];
       case "mismatch":
         return ["pill-mismatch", "Amount mismatch"];
       case "reversed":

@@ -64,6 +64,10 @@ function registerIpcHandlers() {
     storeManager.deleteBatchSource(sourcePdf, ingestedAt)
   );
 
+  ipcMain.handle("batches:set-expected-on-next-invoice", (_event, batchId, expected) =>
+    storeManager.setBatchExpectedOnNextInvoice(batchId, expected)
+  );
+
   ipcMain.handle("invoices:insert", (_event, summary, batchLines, pdfFilename) =>
     storeManager.insertInvoice(summary, batchLines, pdfFilename)
   );

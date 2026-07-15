@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld("api", {
   deleteBatch: (batchId) => ipcRenderer.invoke("batches:delete", batchId),
   deleteBatchSource: (sourcePdf, ingestedAt) =>
     ipcRenderer.invoke("batches:delete-source", sourcePdf, ingestedAt),
+  setBatchExpectedOnNextInvoice: (batchId, expected) =>
+    ipcRenderer.invoke("batches:set-expected-on-next-invoice", batchId, expected),
   insertInvoice: (summary, batchLines, pdfFilename) =>
     ipcRenderer.invoke("invoices:insert", summary, batchLines, pdfFilename),
   getInvoices: () => ipcRenderer.invoke("invoices:list"),

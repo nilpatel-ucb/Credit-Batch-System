@@ -708,8 +708,97 @@ th.num,
 
 .pill-matched { background: var(--green-soft); color: var(--green); }
 .pill-missing { background: var(--red-soft); color: var(--red); }
+.pill-expected { background: var(--blue-soft); color: var(--blue); }
 .pill-unmatched { background: var(--slate-soft); color: var(--ink-2); }
 .pill-mismatch { background: var(--amber-soft); color: var(--amber); }
+
+.pill-tag {
+  border: 0;
+  padding: 4px 8px 4px 10px;
+  cursor: pointer;
+  gap: 6px;
+  font: inherit;
+}
+
+.pill-tag:hover,
+.pill-tag:focus-visible {
+  outline: none;
+  filter: brightness(0.97);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 28%, transparent);
+}
+
+.pill-tag[aria-expanded="true"] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 40%, transparent);
+}
+
+.pill-tag-caret {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.status-tag-menu {
+  position: fixed;
+  z-index: 1210;
+  min-width: 220px;
+  padding: 4px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-2);
+}
+
+.status-tag-menu[hidden] {
+  display: none !important;
+}
+
+.status-tag-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  padding: 9px 12px 9px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.status-tag-option:hover,
+.status-tag-option:focus-visible {
+  outline: none;
+  background: var(--slate-soft);
+}
+
+.status-tag-option.is-active {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.status-tag-check {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-tag-option.is-active .status-tag-check::before {
+  content: "✓";
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
 
 .batch-search-hint {
   padding: 0 22px 12px;
