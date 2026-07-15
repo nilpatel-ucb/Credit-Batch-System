@@ -924,6 +924,7 @@ th.num,
   gap: 20px;
 }
 
+.reconcile-batches-panel,
 .reconcile-comparison-panel {
   padding: 16px 18px 8px;
   overflow: hidden;

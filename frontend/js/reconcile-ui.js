@@ -364,7 +364,7 @@ const ReconcileUI = (() => {
 
     tbody.innerHTML = sortBatches(batches)
       .map(
-        (batch) => `<tr class="${batchRowStatusClass(batch.match_status)}">
+        (batch) => `<tr class="recon-row ${batchRowStatusClass(batch.match_status)}" data-recon-kind="batch" data-batch-id="${batch.id}" data-batch-number="${batch.batch_number}" data-batch-date="${batch.batch_date}">
           <td class="mono">${StoreSelector.formatDate(batch.batch_date)}</td>
           <td class="mono">${StoreSelector.stripLeadingZeros(batch.batch_number)}</td>
           <td class="num">${StoreSelector.formatMoney(batch.net_amount)}</td>
@@ -395,7 +395,7 @@ const ReconcileUI = (() => {
 
     tbody.innerHTML = sortLines(lines)
       .map(
-        (line) => `<tr class="${lineRowStatusClass(line.match_status)}">
+        (line) => `<tr class="recon-row ${lineRowStatusClass(line.match_status)}" data-recon-kind="invoice-line" data-line-id="${line.id}" data-invoice-number="${line.invoice_number || ""}" data-invoice-line-id="${line.invoice_line_id}" data-batch-number="${line.batch_number}" data-line-date="${line.inv_date}">
           <td class="mono">${line.invoice_number || ""}</td>
           <td class="mono">${line.invoice_line_id}</td>
           <td class="mono">${StoreSelector.stripLeadingZeros(line.batch_number)}</td>
@@ -458,11 +458,6 @@ const ReconcileUI = (() => {
       emptyMessage: filtered.query
         ? `No open batches matching #${filtered.query}`
         : "No open batches to reconcile",
-    });
-    renderLinesTable(filtered.lines, {
-      emptyMessage: filtered.query
-        ? `No open invoice lines matching #${filtered.query}`
-        : "No open invoice lines to reconcile",
     });
     document.getElementById("batch-search-clear-btn").disabled =
       !storeOpen || !batchSearchQuery;
@@ -635,36 +630,6 @@ const ReconcileUI = (() => {
       .join("");
   }
 
-  function renderLinesTable(lines, options = {}) {
-    const tbody = document.querySelector("#reconcile-lines-table tbody");
-    document.getElementById("reconcile-line-count").textContent = String(lines.length);
-    const emptyMessage = options.emptyMessage || "No open invoice lines to reconcile";
-
-    if (!lines || lines.length === 0) {
-      tbody.innerHTML = `<tr class="empty-row"><td colspan="6">${emptyMessage}</td></tr>`;
-      return;
-    }
-
-    tbody.innerHTML = sortLines(lines)
-      .map(
-        (line) => {
-          const [pillClass, pillLabel] =
-            typeof DashboardUI !== "undefined"
-              ? DashboardUI.statusPill(line.match_status)
-              : ["pill-unmatched", formatMatchStatus(line.match_status)];
-          return `<tr class="recon-row ${lineRowStatusClass(line.match_status)}" data-recon-kind="invoice-line" data-line-id="${line.id}" data-invoice-number="${line.invoice_number || ""}" data-invoice-line-id="${line.invoice_line_id}" data-batch-number="${line.batch_number}" data-line-date="${line.inv_date}">
-          <td class="mono">${line.invoice_number || ""}</td>
-          <td class="mono">${line.invoice_line_id}</td>
-          <td class="mono">${StoreSelector.stripLeadingZeros(line.batch_number)}</td>
-          <td class="mono">${StoreSelector.formatDate(line.inv_date)}</td>
-          <td class="num">${StoreSelector.formatMoney(line.amount)}</td>
-          <td><span class="pill ${pillClass}">${pillLabel}</span></td>
-        </tr>`;
-        }
-      )
-      .join("");
-  }
-
   function hideContextMenu() {
     const menu = document.getElementById("reconcile-context-menu");
     if (!menu) return;
@@ -751,7 +716,8 @@ const ReconcileUI = (() => {
 
   function initContextMenu() {
     const batchesTable = document.getElementById("reconcile-batches-table");
-    const linesTable = document.getElementById("reconcile-lines-table");
+    const searchBatchesTable = document.getElementById("batch-search-open-batches-table");
+    const searchLinesTable = document.getElementById("batch-search-open-lines-table");
     const menu = document.getElementById("reconcile-context-menu");
 
     const onRowContextMenu = (event) => {
@@ -762,7 +728,8 @@ const ReconcileUI = (() => {
     };
 
     batchesTable?.addEventListener("contextmenu", onRowContextMenu);
-    linesTable?.addEventListener("contextmenu", onRowContextMenu);
+    searchBatchesTable?.addEventListener("contextmenu", onRowContextMenu);
+    searchLinesTable?.addEventListener("contextmenu", onRowContextMenu);
 
     menu?.querySelector('[data-context-action="delete"]')?.addEventListener("click", () => {
       deleteContextTarget();

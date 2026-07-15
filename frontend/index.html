@@ -299,7 +299,7 @@
           <div class="recon-controls-head">
             <div>
               <h3>Open reconciliation</h3>
-              <p class="section-hint">Reconcile to preview matches, then Confirm to archive matched pairs.</p>
+              <p class="section-hint">Focus on credit batches: reconcile to preview matches, then Confirm to archive them. Use batch # search to inspect invoice lines.</p>
             </div>
             <div class="reconcile-controls">
               <button type="button" id="manual-batch-btn" class="btn-ghost" disabled>Add batch</button>
@@ -310,53 +310,26 @@
           <div id="reconcile-status" class="status-message" hidden></div>
         </div>
 
-        <div class="recon-comparison-grid">
-          <div class="card reconcile-comparison-panel">
-            <h4 class="reconcile-subheading">
-              Open batches <span id="reconcile-batch-count" class="badge">0</span>
-            </h4>
-            <div class="table-wrap">
-              <table id="reconcile-batches-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Batch #</th>
-                    <th class="num">Net Amount</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr class="empty-row">
-                    <td colspan="4">Open a store with batches to reconcile</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="card reconcile-comparison-panel">
-            <h4 class="reconcile-subheading">
-              Open invoice lines <span id="reconcile-line-count" class="badge">0</span>
-            </h4>
-            <div class="table-wrap">
-              <table id="reconcile-lines-table">
-                <thead>
-                  <tr>
-                    <th>Invoice #</th>
-                    <th>Invoice Line ID</th>
-                    <th>Batch #</th>
-                    <th>Date</th>
-                    <th class="num">Amount</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr class="empty-row">
-                    <td colspan="6">Open a store with invoices to reconcile</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+        <div class="card reconcile-batches-panel">
+          <h4 class="reconcile-subheading">
+            Open batches <span id="reconcile-batch-count" class="badge">0</span>
+          </h4>
+          <div class="table-wrap">
+            <table id="reconcile-batches-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Batch #</th>
+                  <th class="num">Net Amount</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="empty-row">
+                  <td colspan="4">Open a store with batches to reconcile</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
