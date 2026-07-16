@@ -8,26 +8,25 @@ All PDF parsing, storage, and reconciliation happen on the computer running the 
 
 ## Screenshots
 
-<!-- Replace this block with: ![Dashboard](Documentation/screenshots/dashboard.png) -->
-> **Screenshot placeholder — Dashboard:** show a populated store with the credit-received gauge, summary cards, and batch ledger.
+### Dashboard
 
-<!-- Replace this block with: ![Store management](Documentation/screenshots/store-management.png) -->
-> **Screenshot placeholder — Store management:** show the store sidebar and the Add/Edit Store form with parser template choices.
+![Dashboard showing credit status and reconciliation summary](Screenshots/credit%20batch%201.png)
 
-<!-- Replace this block with: ![Settlement PDF preview](Documentation/screenshots/settlement-preview.png) -->
-> **Screenshot placeholder — Settlement import:** show a multi-file settlement PDF preview with extracted batches and parser warnings.
+### Storage location
 
-<!-- Replace this block with: ![EFT invoice preview](Documentation/screenshots/eft-preview.png) -->
-> **Screenshot placeholder — EFT import:** show invoice totals, balance, period, and extracted invoice lines before saving.
+![Change storage location dialog](Screenshots/credit%20batch%202.png)
 
-<!-- Replace this block with: ![Open reconciliation](Documentation/screenshots/reconciliation.png) -->
-> **Screenshot placeholder — Reconciliation:** show open batches, reconciliation coverage, issue statuses, and the Confirm Matches action.
+### Batch ledger
 
-<!-- Replace this block with: ![Confirmed reconciliation](Documentation/screenshots/confirmed-run.png) -->
-> **Screenshot placeholder — Confirmed runs:** show an expanded confirmed run with its batch-to-invoice matches.
+![Batch ledger with matched settlement batches](Screenshots/credit%20batch%203.png)
 
-<!-- Replace this block with: ![Invoice history](Documentation/screenshots/invoices.png) -->
-> **Screenshot placeholder — Invoice history:** show invoice cards and an expanded line-item table.
+### Open reconciliation
+
+![Open reconciliation showing batches missing from an invoice](Screenshots/credit%20batch%204.png)
+
+### Store selection
+
+![Store selection sidebar](Screenshots/credit%20batch%205.png)
 
 ## What the app does
 
@@ -329,14 +328,12 @@ See `Documentation/PRD_credit_batch_reconciler.md` for the broader product roadm
 
 ## Adding screenshots
 
-Create `Documentation/screenshots/` and replace each placeholder near the top of this README with its commented Markdown image line. Recommended captures:
+Screenshots are stored in `Screenshots/`. Additional useful captures include:
 
-1. Dashboard with representative, anonymized data.
-2. Store sidebar and store form.
-3. Settlement PDF preview.
-4. EFT invoice preview.
-5. Open reconciliation with at least two status types.
-6. Expanded confirmed run.
-7. Expanded invoice card.
+1. Settlement PDF preview.
+2. EFT invoice preview.
+3. Open reconciliation with multiple status types.
+4. Expanded confirmed run.
+5. Expanded invoice card.
 
 Use anonymized store names, site IDs, invoice numbers, filenames, and dollar amounts before committing images.
