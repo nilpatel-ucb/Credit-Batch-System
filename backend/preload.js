@@ -37,10 +37,10 @@ contextBridge.exposeInMainWorld("api", {
   confirmReconciliation: () => ipcRenderer.invoke("reconcile:confirm"),
   listReconciliationRuns: () => ipcRenderer.invoke("reconcile:runs"),
   getReconciliationRun: (runId) => ipcRenderer.invoke("reconcile:runDetail", runId),
-  parseBatchPdf: (buffer, templateId) => {
+  parseBatchPdf: (buffer, templateId, siteId) => {
     const bytes =
       buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
-    return ipcRenderer.invoke("parse:batch", bytes, templateId);
+    return ipcRenderer.invoke("parse:batch", bytes, templateId, siteId);
   },
   parseEftPdf: (buffer, templateId) => {
     const bytes =

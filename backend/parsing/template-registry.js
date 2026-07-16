@@ -7,6 +7,12 @@ const BATCH_TEMPLATES = {
     label: "Chevron",
     getParse: () => require("./chevron-pipeline").parseChevronPdf,
   },
+  cstore_green_valley: {
+    id: "cstore_green_valley",
+    label: "CStore Green Valley",
+    getParse: () =>
+      require("./cstore-green-valley-pipeline").parseCStoreGreenValleyPdf,
+  },
 };
 
 const EFT_TEMPLATES = {
@@ -19,6 +25,11 @@ const EFT_TEMPLATES = {
     id: "jackson_eft",
     label: "Jackson EFT",
     getParse: () => require("./eft-pipeline").parseJacksonEftPdf,
+  },
+  jenkins_green_valley_eft: {
+    id: "jenkins_green_valley_eft",
+    label: "Jenkins Green Valley",
+    getParse: () => require("./eft-pipeline").parseJenkinsGreenValleyEftPdf,
   },
 };
 

@@ -1,6 +1,7 @@
 const { extractLinesFromPdf } = require("./ingestion");
 const EftInvoiceTemplate = require("./templates/eft_invoice");
 const JacksonEftInvoiceTemplate = require("./templates/jackson_eft_invoice");
+const JenkinsGreenValleyEftInvoiceTemplate = require("./templates/jenkins_green_valley_eft_invoice");
 const Normalize = require("./normalize");
 
 function createParseEftPdf(template) {
@@ -20,5 +21,13 @@ function createParseEftPdf(template) {
 
 const parseEftPdf = createParseEftPdf(EftInvoiceTemplate);
 const parseJacksonEftPdf = createParseEftPdf(JacksonEftInvoiceTemplate);
+const parseJenkinsGreenValleyEftPdf = createParseEftPdf(
+  JenkinsGreenValleyEftInvoiceTemplate
+);
 
-module.exports = { parseEftPdf, parseJacksonEftPdf, createParseEftPdf };
+module.exports = {
+  parseEftPdf,
+  parseJacksonEftPdf,
+  parseJenkinsGreenValleyEftPdf,
+  createParseEftPdf,
+};

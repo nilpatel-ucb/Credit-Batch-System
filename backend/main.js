@@ -201,14 +201,14 @@ function registerIpcHandlers() {
     storeManager.getReconciliationRun(runId)
   );
 //if parsing is empty throw an error
-  ipcMain.handle("parse:batch", async (_event, buffer, templateId) => {
+  ipcMain.handle("parse:batch", async (_event, buffer, templateId, siteId) => {
     const { getBatchPipeline } = require("./parsing/template-registry");
     const { toUint8Array } = require("./parsing/buffer-utils");
     const bytes = toUint8Array(buffer);
     if (bytes.byteLength === 0) {
       throw new Error("The PDF file is empty.");
     }
-    return getBatchPipeline(templateId)(bytes);
+    return getBatchPipeline(templateId)(bytes, { siteId });
   });
 
   ipcMain.handle("parse:eft", async (_event, buffer, templateId) => {

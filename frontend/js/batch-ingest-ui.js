@@ -162,7 +162,8 @@ const BatchIngestUI = (() => {
 
     const result = await window.api.parseBatchPdf(
       buffer,
-      StoreSelector.getActiveBatchTemplate()
+      StoreSelector.getActiveBatchTemplate(),
+      StoreSelector.getActiveSiteId()
     );
     const records = result.records || [];
     const warnings = (result.warnings || []).map((warning) => ({
