@@ -160,7 +160,10 @@ const BatchIngestUI = (() => {
       };
     }
 
-    const result = await window.api.parseChevronPdf(buffer);
+    const result = await window.api.parseBatchPdf(
+      buffer,
+      StoreSelector.getActiveBatchTemplate()
+    );
     const records = result.records || [];
     const warnings = (result.warnings || []).map((warning) => ({
       ...warning,

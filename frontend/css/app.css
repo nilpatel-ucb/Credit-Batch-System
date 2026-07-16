@@ -848,6 +848,7 @@ button.danger,
 
 .toolbar-search input,
 .store-form input,
+.store-form select,
 #batch-search-input {
   font-family: var(--sans);
   font-size: 13px;
@@ -859,13 +860,15 @@ button.danger,
   min-width: 140px;
 }
 
-.store-form input {
+.store-form input,
+.store-form select {
   width: 100%;
   min-width: 0;
 }
 
 .toolbar-search input:focus,
 .store-form input:focus,
+.store-form select:focus,
 #batch-search-input:focus {
   outline: 2px solid var(--blue);
   outline-offset: 1px;

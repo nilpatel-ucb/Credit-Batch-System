@@ -6,7 +6,9 @@ CREATE TABLE IF NOT EXISTS store_meta (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   site_id TEXT NOT NULL,
   name TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  batch_template TEXT NOT NULL DEFAULT 'chevron',
+  eft_template TEXT NOT NULL DEFAULT 'jenkins_eft'
 );
 
 CREATE TABLE IF NOT EXISTS reconciliation_runs (

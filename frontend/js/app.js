@@ -360,7 +360,9 @@ const App = (() => {
         result.name,
         result.site_id,
         result.batchCount,
-        result.dbPath
+        result.dbPath,
+        result.batch_template,
+        result.eft_template
       );
     }
     await ReconcileUI.refresh();
@@ -494,7 +496,9 @@ const App = (() => {
         result.name,
         result.site_id,
         batchCount ?? result.batchCount,
-        result.dbPath
+        result.dbPath,
+        result.batch_template,
+        result.eft_template
       );
     }
 

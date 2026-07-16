@@ -113,19 +113,30 @@ function registerIpcHandlers() {
 
   ipcMain.handle("stores:list", () => storeManager.listStores());
 
-  ipcMain.handle("stores:create", (_event, name, siteId) =>
-    storeManager.createStore(name, siteId)
+  ipcMain.handle("stores:create", (_event, name, siteId, batchTemplate, eftTemplate) =>
+    storeManager.createStore(name, siteId, batchTemplate, eftTemplate)
   );
 
   ipcMain.handle("stores:info", () => storeManager.getStoreInfo());
 
   ipcMain.handle("stores:open", (_event, name) => storeManager.openStore(name));
 
-  ipcMain.handle("stores:update", (_event, name, siteId) =>
-    storeManager.updateStore(name, siteId)
+  ipcMain.handle("stores:update", (_event, name, siteId, batchTemplate, eftTemplate) =>
+    storeManager.updateStore(name, siteId, batchTemplate, eftTemplate)
   );
 
   ipcMain.handle("stores:delete", (_event, name) => storeManager.deleteStore(name));
+
+  ipcMain.handle("templates:list", () => {
+    const {
+      listBatchTemplates,
+      listEftTemplates,
+    } = require("./parsing/template-registry");
+    return {
+      batchTemplates: listBatchTemplates(),
+      eftTemplates: listEftTemplates(),
+    };
+  });
 
   ipcMain.handle("shell:showItemInFolder", (_event, filePath) => {
     if (!filePath || typeof filePath !== "string") {
@@ -190,24 +201,24 @@ function registerIpcHandlers() {
     storeManager.getReconciliationRun(runId)
   );
 //if parsing is empty throw an error
-  ipcMain.handle("parse:chevron", async (_event, buffer) => {
-    const { parseChevronPdf } = require("./parsing/chevron-pipeline");
+  ipcMain.handle("parse:batch", async (_event, buffer, templateId) => {
+    const { getBatchPipeline } = require("./parsing/template-registry");
     const { toUint8Array } = require("./parsing/buffer-utils");
     const bytes = toUint8Array(buffer);
     if (bytes.byteLength === 0) {
       throw new Error("The PDF file is empty.");
     }
-    return parseChevronPdf(bytes);
+    return getBatchPipeline(templateId)(bytes);
   });
 
-  ipcMain.handle("parse:eft", async (_event, buffer) => {
-    const { parseEftPdf } = require("./parsing/eft-pipeline");
+  ipcMain.handle("parse:eft", async (_event, buffer, templateId) => {
+    const { getEftPipeline } = require("./parsing/template-registry");
     const { toUint8Array } = require("./parsing/buffer-utils");
     const bytes = toUint8Array(buffer);
     if (bytes.byteLength === 0) {
       throw new Error("The PDF file is empty.");
     }
-    return parseEftPdf(bytes);
+    return getEftPipeline(templateId)(bytes);
   });
 }
 

@@ -455,6 +455,18 @@
             <span>Chevron site ID</span>
             <input type="text" id="store-form-site-id" placeholder="5–6 digits" required pattern="\d{5,6}" inputmode="numeric" title="Enter the 5–6 digit site ID from Chevron PDFs" autocomplete="off">
           </label>
+          <label class="form-field">
+            <span>Credit batch template</span>
+            <select id="store-form-batch-template" required>
+              <option value="chevron">Chevron</option>
+            </select>
+          </label>
+          <label class="form-field">
+            <span>EFT invoice template</span>
+            <select id="store-form-eft-template" required>
+              <option value="jenkins_eft">Jenkins EFT</option>
+            </select>
+          </label>
           <p id="store-form-status" class="store-form-status" hidden></p>
           <div class="preview-actions">
             <button type="submit" id="store-form-submit" class="primary">Add store</button>

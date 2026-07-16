@@ -116,8 +116,18 @@ function testListStores() {
 
   const stores = manager.listStores();
   assert.deepStrictEqual(stores, [
-    { name: "Alpha", site_id: "111111" },
-    { name: "Beta", site_id: "222222" },
+    {
+      name: "Alpha",
+      site_id: "111111",
+      batch_template: "chevron",
+      eft_template: "jenkins_eft",
+    },
+    {
+      name: "Beta",
+      site_id: "222222",
+      batch_template: "chevron",
+      eft_template: "jenkins_eft",
+    },
   ]);
 
   fs.rmSync(dir, { recursive: true, force: true });
@@ -181,9 +191,13 @@ function testSchemaCreated() {
   assert.ok(tables.includes("reconciliation_runs"));
   assert.ok(tables.includes("schema_version"));
 
-  const meta = db.prepare("SELECT site_id, name FROM store_meta WHERE id = 1").get();
+  const meta = db
+    .prepare("SELECT site_id, name, batch_template, eft_template FROM store_meta WHERE id = 1")
+    .get();
   assert.strictEqual(meta.site_id, "309359");
   assert.strictEqual(meta.name, "Test");
+  assert.strictEqual(meta.batch_template, "chevron");
+  assert.strictEqual(meta.eft_template, "jenkins_eft");
 
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -206,9 +220,41 @@ function testUpdateStoreNameAndSiteId() {
 
   const manager2 = createStoreManager(dir);
   const stores = manager2.listStores();
-  assert.deepStrictEqual(stores, [{ name: "Sunset Plaza", site_id: "309359" }]);
+  assert.deepStrictEqual(stores, [
+    {
+      name: "Sunset Plaza",
+      site_id: "309359",
+      batch_template: "chevron",
+      eft_template: "jenkins_eft",
+    },
+  ]);
 
   manager2.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function testStoreTemplatesDefaultAndUpdate() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  const created = manager.createStore("Sunset", "309359");
+  assert.strictEqual(created.batch_template, "chevron");
+  assert.strictEqual(created.eft_template, "jenkins_eft");
+
+  const opened = manager.openStore("Sunset");
+  assert.strictEqual(opened.batch_template, "chevron");
+  assert.strictEqual(opened.eft_template, "jenkins_eft");
+
+  const updated = manager.updateStore("Sunset", "309359", "chevron", "jenkins_eft");
+  assert.strictEqual(updated.batch_template, "chevron");
+  assert.strictEqual(updated.eft_template, "jenkins_eft");
+
+  assert.throws(
+    () => manager.updateStore("Sunset", "309359", "unknown_batch", "jenkins_eft"),
+    /Unknown credit batch template/
+  );
+
+  manager.close();
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -226,7 +272,14 @@ function testDeleteStore() {
   assert.strictEqual(manager.getCurrentStoreName(), null);
 
   const stores = manager.listStores();
-  assert.deepStrictEqual(stores, [{ name: "Mako", site_id: "222222" }]);
+  assert.deepStrictEqual(stores, [
+    {
+      name: "Mako",
+      site_id: "222222",
+      batch_template: "chevron",
+      eft_template: "jenkins_eft",
+    },
+  ]);
 
   manager.close();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -872,6 +925,7 @@ function run() {
   testRejectMismatchedSiteId();
   testRejectDuplicateSiteIdAcrossStores();
   testUpdateStoreNameAndSiteId();
+  testStoreTemplatesDefaultAndUpdate();
   testDeleteStore();
   testRejectSiteIdChangeWhenBatchesExist();
   testSchemaCreated();

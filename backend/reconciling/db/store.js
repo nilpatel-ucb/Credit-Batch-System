@@ -3,6 +3,12 @@ const path = require("path");
 const Database = require("better-sqlite3");
 const { migrate } = require("./migrations");
 const Normalize = require("../../parsing/normalize");
+const {
+  DEFAULT_BATCH_TEMPLATE,
+  DEFAULT_EFT_TEMPLATE,
+  normalizeBatchTemplateId,
+  normalizeEftTemplateId,
+} = require("../../parsing/template-registry");
 const { runStoreReconciliation, resetStoreReconciliationState } = require("../reconcile-service");
 const { computeMismatchShortfall } = require("../reconcile");
 
@@ -48,40 +54,82 @@ function normalizeSiteId(siteId) {
   return normalized;
 }
 
+function normalizeTemplates(batchTemplate, eftTemplate) {
+  return {
+    batch_template: normalizeBatchTemplateId(batchTemplate || DEFAULT_BATCH_TEMPLATE),
+    eft_template: normalizeEftTemplateId(eftTemplate || DEFAULT_EFT_TEMPLATE),
+  };
+}
+
 function readStoreMeta(database) {
   try {
-    return database.prepare("SELECT site_id, name, created_at FROM store_meta WHERE id = 1").get() || null;
+    const row =
+      database
+        .prepare(
+          `SELECT site_id, name, created_at, batch_template, eft_template
+           FROM store_meta WHERE id = 1`
+        )
+        .get() || null;
+    if (!row) return null;
+    const templates = normalizeTemplates(row.batch_template, row.eft_template);
+    return {
+      ...row,
+      batch_template: templates.batch_template,
+      eft_template: templates.eft_template,
+    };
   } catch {
     return null;
   }
 }
 
-function insertStoreMeta(database, name, siteId) {
+function insertStoreMeta(database, name, siteId, batchTemplate, eftTemplate) {
+  const templates = normalizeTemplates(batchTemplate, eftTemplate);
   database
     .prepare(
-      `INSERT INTO store_meta (id, site_id, name, created_at)
-       VALUES (1, @site_id, @name, @created_at)`
+      `INSERT INTO store_meta (id, site_id, name, created_at, batch_template, eft_template)
+       VALUES (1, @site_id, @name, @created_at, @batch_template, @eft_template)`
     )
     .run({
       site_id: normalizeSiteId(siteId),
       name: sanitizeStoreName(name),
       created_at: new Date().toISOString(),
+      batch_template: templates.batch_template,
+      eft_template: templates.eft_template,
     });
 }
 
-function upsertStoreMeta(database, name, siteId) {
+function upsertStoreMeta(database, name, siteId, batchTemplate, eftTemplate) {
   const existing = readStoreMeta(database);
+  const templates = normalizeTemplates(
+    batchTemplate ?? existing?.batch_template,
+    eftTemplate ?? existing?.eft_template
+  );
   const payload = {
     site_id: normalizeSiteId(siteId),
     name: sanitizeStoreName(name),
+    batch_template: templates.batch_template,
+    eft_template: templates.eft_template,
   };
   if (existing) {
     database
-      .prepare(`UPDATE store_meta SET site_id = @site_id, name = @name WHERE id = 1`)
+      .prepare(
+        `UPDATE store_meta
+         SET site_id = @site_id,
+             name = @name,
+             batch_template = @batch_template,
+             eft_template = @eft_template
+         WHERE id = 1`
+      )
       .run(payload);
     return;
   }
-  insertStoreMeta(database, payload.name, payload.site_id);
+  insertStoreMeta(
+    database,
+    payload.name,
+    payload.site_id,
+    payload.batch_template,
+    payload.eft_template
+  );
 }
 
 function inferStoreMetaFromBatches(database, storeName) {
@@ -181,14 +229,17 @@ function createStoreManager(storesDir) {
         return {
           name,
           site_id: meta ? meta.site_id : null,
+          batch_template: meta ? meta.batch_template : DEFAULT_BATCH_TEMPLATE,
+          eft_template: meta ? meta.eft_template : DEFAULT_EFT_TEMPLATE,
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  function createStore(name, siteId) {
+  function createStore(name, siteId, batchTemplate, eftTemplate) {
     const storeName = sanitizeStoreName(name);
     const normalizedSiteId = normalizeSiteId(siteId);
+    const templates = normalizeTemplates(batchTemplate, eftTemplate);
     const filePath = dbPath(storeName);
     if (fs.existsSync(filePath)) {
       throw new Error(`Store "${storeName}" already exists.`);
@@ -203,9 +254,20 @@ function createStoreManager(storesDir) {
 
     const newDb = new Database(filePath);
     migrate(newDb);
-    insertStoreMeta(newDb, storeName, normalizedSiteId);
+    insertStoreMeta(
+      newDb,
+      storeName,
+      normalizedSiteId,
+      templates.batch_template,
+      templates.eft_template
+    );
     newDb.close();
-    return { name: storeName, site_id: normalizedSiteId };
+    return {
+      name: storeName,
+      site_id: normalizedSiteId,
+      batch_template: templates.batch_template,
+      eft_template: templates.eft_template,
+    };
   }
 
   function openStore(name) {
@@ -214,6 +276,8 @@ function createStoreManager(storesDir) {
     return {
       name: currentStoreName,
       site_id: meta ? meta.site_id : null,
+      batch_template: meta ? meta.batch_template : DEFAULT_BATCH_TEMPLATE,
+      eft_template: meta ? meta.eft_template : DEFAULT_EFT_TEMPLATE,
       batchCount: getBatchCount(),
       dbPath: dbPath(currentStoreName),
     };
@@ -232,6 +296,8 @@ function createStoreManager(storesDir) {
     return {
       name: currentStoreName,
       site_id: meta ? meta.site_id : null,
+      batch_template: meta ? meta.batch_template : DEFAULT_BATCH_TEMPLATE,
+      eft_template: meta ? meta.eft_template : DEFAULT_EFT_TEMPLATE,
       batchCount: getBatchCount(),
       dbPath: dbPath(currentStoreName),
     };
@@ -458,12 +524,16 @@ function createStoreManager(storesDir) {
     return { added, skipped, reconciliation };
   }
 
-  function updateStore(name, siteId) {
+  function updateStore(name, siteId, batchTemplate, eftTemplate) {
     const database = requireDb();
     const oldName = currentStoreName;
     const meta = ensureStoreMeta(database, oldName);
     const newName = sanitizeStoreName(name);
     const newSiteId = normalizeSiteId(siteId);
+    const templates = normalizeTemplates(
+      batchTemplate ?? meta?.batch_template,
+      eftTemplate ?? meta?.eft_template
+    );
 
     const duplicate = listStores().find(
       (store) => store.site_id === newSiteId && store.name !== oldName
@@ -487,7 +557,13 @@ function createStoreManager(storesDir) {
       }
     }
 
-    upsertStoreMeta(database, newName, newSiteId);
+    upsertStoreMeta(
+      database,
+      newName,
+      newSiteId,
+      templates.batch_template,
+      templates.eft_template
+    );
 
     if (newName !== oldName) {
       const oldPath = dbPath(oldName);
@@ -506,6 +582,8 @@ function createStoreManager(storesDir) {
     return {
       name: currentStoreName,
       site_id: newSiteId,
+      batch_template: templates.batch_template,
+      eft_template: templates.eft_template,
       batchCount: getBatchCount(),
       dbPath: dbPath(currentStoreName),
     };

@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const CURRENT_VERSION = 5;
+const CURRENT_VERSION = 6;
 
 function getSchemaSql() {
   return fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
@@ -117,6 +117,31 @@ function migrateToV5(db) {
   setSchemaVersion(db, 5);
 }
 
+function migrateToV6(db) {
+  const columns = db.prepare("PRAGMA table_info(store_meta)").all();
+  const hasBatchTemplate = columns.some((column) => column.name === "batch_template");
+  const hasEftTemplate = columns.some((column) => column.name === "eft_template");
+
+  if (!hasBatchTemplate) {
+    db.exec(
+      `ALTER TABLE store_meta ADD COLUMN batch_template TEXT NOT NULL DEFAULT 'chevron';`
+    );
+  }
+  if (!hasEftTemplate) {
+    db.exec(
+      `ALTER TABLE store_meta ADD COLUMN eft_template TEXT NOT NULL DEFAULT 'jenkins_eft';`
+    );
+  }
+
+  db.exec(`
+    UPDATE store_meta
+    SET batch_template = COALESCE(NULLIF(TRIM(batch_template), ''), 'chevron'),
+        eft_template = COALESCE(NULLIF(TRIM(eft_template), ''), 'jenkins_eft');
+  `);
+
+  setSchemaVersion(db, 6);
+}
+
 function migrate(db) {
   let version = getSchemaVersion(db);
 
@@ -142,6 +167,11 @@ function migrate(db) {
 
   if (version < 5) {
     migrateToV5(db);
+    version = 5;
+  }
+
+  if (version < 6) {
+    migrateToV6(db);
   }
 }
 

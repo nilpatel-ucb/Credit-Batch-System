@@ -181,7 +181,10 @@ const InvoiceIngestUI = (() => {
       };
     }
 
-    const result = await window.api.parseEftPdf(buffer);
+    const result = await window.api.parseEftPdf(
+      buffer,
+      StoreSelector.getActiveEftTemplate()
+    );
     const summary = result.summary;
     const batchLines = result.batchLines || [];
     const warnings = (result.warnings || []).map((warning) => ({

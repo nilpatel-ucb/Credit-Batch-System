@@ -1,11 +1,13 @@
 const StoreSelector = (() => {
   let activeStore = null;
   let activeSiteId = null;
+  let activeBatchTemplate = "chevron";
+  let activeEftTemplate = "jenkins_eft";
   let onStoreChange = null;
   let sidebarOpen = false;
   let storeFormMode = "add"; // "add" | "edit"
   let editingStoreName = null;
-  let contextStore = null; // { name, site_id }
+  let contextStore = null; // { name, site_id, batch_template, eft_template }
 
   function formatMoney(value) {
     return Number(value).toLocaleString("en-US", {
@@ -152,17 +154,23 @@ const StoreSelector = (() => {
     const submit = document.getElementById("store-form-submit");
     const nameInput = document.getElementById("store-form-name");
     const siteInput = document.getElementById("store-form-site-id");
+    const batchTemplateInput = document.getElementById("store-form-batch-template");
+    const eftTemplateInput = document.getElementById("store-form-eft-template");
 
     if (mode === "edit" && store) {
       title.textContent = "Edit store";
       submit.textContent = "Save changes";
       nameInput.value = store.name || "";
       siteInput.value = store.site_id || "";
+      batchTemplateInput.value = store.batch_template || "chevron";
+      eftTemplateInput.value = store.eft_template || "jenkins_eft";
     } else {
       title.textContent = "Add store";
       submit.textContent = "Add store";
       nameInput.value = "";
       siteInput.value = "";
+      batchTemplateInput.value = "chevron";
+      eftTemplateInput.value = "jenkins_eft";
     }
 
     setStoreFormStatus("");
@@ -175,9 +183,11 @@ const StoreSelector = (() => {
     nameInput.select?.();
   }
 
-  function setActiveStoreInfo(name, siteId, batchCount, dbPath) {
+  function setActiveStoreInfo(name, siteId, batchCount, dbPath, batchTemplate, eftTemplate) {
     activeStore = name;
     activeSiteId = siteId || null;
+    activeBatchTemplate = batchTemplate || "chevron";
+    activeEftTemplate = eftTemplate || "jenkins_eft";
     const siteLabel = siteId ? ` · site ${siteId}` : "";
     document.getElementById("active-store").textContent =
       `Active: ${name}${siteLabel} (${batchCount} batches)`;
@@ -191,6 +201,8 @@ const StoreSelector = (() => {
   function clearActiveStore() {
     activeStore = null;
     activeSiteId = null;
+    activeBatchTemplate = "chevron";
+    activeEftTemplate = "jenkins_eft";
     document.getElementById("active-store").textContent = "No store selected";
     document.getElementById("batch-count-badge").textContent = "0";
     updateStoreToggleLabel(null);
@@ -241,6 +253,8 @@ const StoreSelector = (() => {
         showStoreContextMenu(event, {
           name: store.name,
           site_id: store.site_id || "",
+          batch_template: store.batch_template || "chevron",
+          eft_template: store.eft_template || "jenkins_eft",
         });
       });
       switchEl.appendChild(btn);
@@ -261,7 +275,14 @@ const StoreSelector = (() => {
 
   async function openStore(name) {
     const result = await window.api.openStore(name);
-    setActiveStoreInfo(result.name, result.site_id, result.batchCount, result.dbPath);
+    setActiveStoreInfo(
+      result.name,
+      result.site_id,
+      result.batchCount,
+      result.dbPath,
+      result.batch_template,
+      result.eft_template
+    );
     await refreshStoreList();
     if (onStoreChange) {
       await onStoreChange(result);
@@ -269,18 +290,25 @@ const StoreSelector = (() => {
     return result;
   }
 
-  async function createStore(name, siteId) {
-    await window.api.createStore(name, siteId);
+  async function createStore(name, siteId, batchTemplate, eftTemplate) {
+    await window.api.createStore(name, siteId, batchTemplate, eftTemplate);
     await refreshStoreList();
     await openStore(name);
   }
 
-  async function updateStore(name, siteId) {
+  async function updateStore(name, siteId, batchTemplate, eftTemplate) {
     if (editingStoreName && editingStoreName !== activeStore) {
       await window.api.openStore(editingStoreName);
     }
-    const result = await window.api.updateStore(name, siteId);
-    setActiveStoreInfo(result.name, result.site_id, result.batchCount, result.dbPath);
+    const result = await window.api.updateStore(name, siteId, batchTemplate, eftTemplate);
+    setActiveStoreInfo(
+      result.name,
+      result.site_id,
+      result.batchCount,
+      result.dbPath,
+      result.batch_template,
+      result.eft_template
+    );
     await refreshStoreList();
     if (onStoreChange) {
       await onStoreChange(result);
@@ -313,6 +341,14 @@ const StoreSelector = (() => {
     return activeSiteId;
   }
 
+  function getActiveBatchTemplate() {
+    return activeBatchTemplate;
+  }
+
+  function getActiveEftTemplate() {
+    return activeEftTemplate;
+  }
+
   function init(handlers) {
     onStoreChange = handlers.onStoreChange;
 
@@ -337,13 +373,15 @@ const StoreSelector = (() => {
       e.preventDefault();
       const name = document.getElementById("store-form-name").value.trim();
       const siteId = document.getElementById("store-form-site-id").value.trim();
-      if (!name || !siteId) return;
+      const batchTemplate = document.getElementById("store-form-batch-template").value;
+      const eftTemplate = document.getElementById("store-form-eft-template").value;
+      if (!name || !siteId || !batchTemplate || !eftTemplate) return;
 
       try {
         if (storeFormMode === "edit") {
-          await updateStore(name, siteId);
+          await updateStore(name, siteId, batchTemplate, eftTemplate);
         } else {
-          await createStore(name, siteId);
+          await createStore(name, siteId, batchTemplate, eftTemplate);
         }
         if (typeof DashboardUI !== "undefined") {
           DashboardUI.closeModal("store-form-modal");
@@ -408,6 +446,8 @@ const StoreSelector = (() => {
     setActiveStoreInfo,
     getActiveStore,
     getActiveSiteId,
+    getActiveBatchTemplate,
+    getActiveEftTemplate,
     setSidebarOpen,
     formatMoney,
     formatDate,

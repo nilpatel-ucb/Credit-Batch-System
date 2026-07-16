@@ -2,10 +2,13 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
   listStores: () => ipcRenderer.invoke("stores:list"),
-  createStore: (name, siteId) => ipcRenderer.invoke("stores:create", name, siteId),
+  createStore: (name, siteId, batchTemplate, eftTemplate) =>
+    ipcRenderer.invoke("stores:create", name, siteId, batchTemplate, eftTemplate),
   openStore: (name) => ipcRenderer.invoke("stores:open", name),
-  updateStore: (name, siteId) => ipcRenderer.invoke("stores:update", name, siteId),
+  updateStore: (name, siteId, batchTemplate, eftTemplate) =>
+    ipcRenderer.invoke("stores:update", name, siteId, batchTemplate, eftTemplate),
   deleteStore: (name) => ipcRenderer.invoke("stores:delete", name),
+  listTemplates: () => ipcRenderer.invoke("templates:list"),
   showItemInFolder: (filePath) => ipcRenderer.invoke("shell:showItemInFolder", filePath),
   getStorageInfo: () => ipcRenderer.invoke("paths:get"),
   chooseStorageFolder: () => ipcRenderer.invoke("paths:chooseFolder"),
@@ -34,14 +37,14 @@ contextBridge.exposeInMainWorld("api", {
   confirmReconciliation: () => ipcRenderer.invoke("reconcile:confirm"),
   listReconciliationRuns: () => ipcRenderer.invoke("reconcile:runs"),
   getReconciliationRun: (runId) => ipcRenderer.invoke("reconcile:runDetail", runId),
-  parseChevronPdf: (buffer) => {
+  parseBatchPdf: (buffer, templateId) => {
     const bytes =
       buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
-    return ipcRenderer.invoke("parse:chevron", bytes);
+    return ipcRenderer.invoke("parse:batch", bytes, templateId);
   },
-  parseEftPdf: (buffer) => {
+  parseEftPdf: (buffer, templateId) => {
     const bytes =
       buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
-    return ipcRenderer.invoke("parse:eft", bytes);
+    return ipcRenderer.invoke("parse:eft", bytes, templateId);
   },
 });
