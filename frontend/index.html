@@ -225,6 +225,27 @@
               </table>
             </div>
           </div>
+          <div id="batch-search-open-lines" class="batch-search-section">
+            <h4 class="reconcile-subheading">
+              Open invoice lines
+              <span id="batch-search-open-lines-count" class="badge">0</span>
+            </h4>
+            <div class="table-wrap">
+              <table id="batch-search-open-lines-table">
+                <thead>
+                  <tr>
+                    <th>Invoice #</th>
+                    <th>Invoice Line ID</th>
+                    <th>Batch #</th>
+                    <th>Date</th>
+                    <th class="num">Amount</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
           <div id="batch-search-reconciled" class="batch-search-section">
             <h4 class="reconcile-subheading">
               Reconciled matches
@@ -305,7 +326,7 @@
           <div class="recon-controls-head">
             <div>
               <h3>Open reconciliation</h3>
-              <p class="section-hint">Focus on credit batches: reconcile to preview matches, then Confirm to archive them. Use batch # search to inspect open and reconciled batches.</p>
+              <p class="section-hint">Focus on credit batches: reconcile to preview matches, then Confirm to archive them. Use batch # search to inspect invoice lines.</p>
             </div>
             <div class="reconcile-controls">
               <button type="button" id="manual-batch-btn" class="btn-ghost" disabled>Add batch</button>
