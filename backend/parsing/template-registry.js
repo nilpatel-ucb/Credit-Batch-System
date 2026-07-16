@@ -15,6 +15,11 @@ const EFT_TEMPLATES = {
     label: "Jenkins EFT",
     getParse: () => require("./eft-pipeline").parseEftPdf,
   },
+  jackson_eft: {
+    id: "jackson_eft",
+    label: "Jackson EFT",
+    getParse: () => require("./eft-pipeline").parseJacksonEftPdf,
+  },
 };
 
 function listBatchTemplates() {
