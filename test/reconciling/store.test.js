@@ -917,6 +917,99 @@ function testExpectedOnNextInvoiceExcludedUntilNewEft() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+function testGreenValleyUsesSeparateAggregateReconciliation() {
+  const dir = makeTempStoresDir();
+  const manager = createStoreManager(dir);
+
+  manager.createStore(
+    "Green Valley",
+    "123456",
+    "cstore_green_valley",
+    "jenkins_green_valley_eft"
+  );
+  manager.openStore("Green Valley");
+  manager.insertBatches(
+    [
+      {
+        site_id: "123456",
+        batch_date: "2026-06-01",
+        batch_number: "0602",
+        gross_amount: 0,
+        total_fee: 0,
+        net_amount: 60000,
+      },
+      {
+        site_id: "123456",
+        batch_date: "2026-06-02",
+        batch_number: "0603",
+        gross_amount: 0,
+        total_fee: 0,
+        net_amount: 49616.19,
+      },
+      {
+        site_id: "123456",
+        batch_date: "2026-06-30",
+        batch_number: "0701",
+        gross_amount: 0,
+        total_fee: 0,
+        net_amount: 1000,
+      },
+    ],
+    "green-valley.pdf"
+  );
+
+  const expected = manager.getBatches().find((batch) => batch.batch_number === "0701");
+  manager.setBatchExpectedOnNextInvoice(expected.id, true);
+
+  const inserted = manager.insertInvoice(
+    {
+      invoiceNumber: "0619631",
+      amount: 58604.07,
+      balance: -51012.12,
+    },
+    [
+      {
+        invoiceId: "BBB8622",
+        batchNumber: "0614",
+        amount: -50000,
+        invDate: "2026-06-14",
+      },
+      {
+        invoiceId: "BBB8623",
+        batchNumber: "0615",
+        amount: -59616.19,
+        invDate: "2026-06-15",
+      },
+    ],
+    "green-valley-eft.pdf"
+  );
+
+  assert.strictEqual(inserted.reconciliation.summary.matchedCount, 2);
+  assert.strictEqual(inserted.reconciliation.summary.mismatchCount, 0);
+  assert.strictEqual(inserted.reconciliation.summary.missingFromInvoiceCount, 0);
+  assert.strictEqual(inserted.reconciliation.summary.invoiceTotal, 58604.07);
+  assert.strictEqual(inserted.reconciliation.summary.creditDiscrepancy, 0);
+
+  const batches = manager.getBatches();
+  assert.strictEqual(
+    batches.find((batch) => batch.batch_number === "0701").match_status,
+    "expected_on_next_invoice"
+  );
+  assert.strictEqual(
+    batches.filter((batch) => batch.batch_number !== "0701").every(
+      (batch) => batch.match_status === "matched"
+    ),
+    true
+  );
+
+  const refreshed = manager.getStoreReconciliation();
+  assert.strictEqual(refreshed.summary.matchedCount, 2);
+  assert.strictEqual(refreshed.summary.mismatchCount, 0);
+
+  manager.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 function run() {
   testCreateInsertAndCount();
   testDedupeOnInsert();
@@ -942,6 +1035,7 @@ function run() {
   testMismatchShortfallOnlyInTotalMissingCredit();
   testDeleteInvoiceClearsMissingFromInvoiceFlags();
   testExpectedOnNextInvoiceExcludedUntilNewEft();
+  testGreenValleyUsesSeparateAggregateReconciliation();
   console.log("PASS store tests");
 }
 

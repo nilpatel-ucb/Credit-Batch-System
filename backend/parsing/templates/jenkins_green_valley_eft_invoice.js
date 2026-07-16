@@ -113,6 +113,7 @@ const JenkinsGreenValleyEftInvoiceTemplate = (() => {
 
   function extractFromLines(lines) {
     const batchLines = [];
+    const numericInvoiceRows = [];
     const warnings = [];
     let summary = null;
 
@@ -146,13 +147,22 @@ const JenkinsGreenValleyEftInvoiceTemplate = (() => {
         return;
       }
 
-      summary = {
+      numericInvoiceRows.push({
         invoiceNumber: invoiceId,
         amount: parseAmount(amountStr),
-      };
+      });
     });
 
     const balance = findFooterBalance(lines);
+    if (numericInvoiceRows.length > 0) {
+      const lastNumericRow = numericInvoiceRows[numericInvoiceRows.length - 1];
+      summary = {
+        invoiceNumber: lastNumericRow.invoiceNumber,
+        amount: Math.round(
+          numericInvoiceRows.reduce((sum, row) => sum + row.amount, 0) * 100
+        ) / 100,
+      };
+    }
 
     if (batchLines.length === 0) {
       warnings.push({

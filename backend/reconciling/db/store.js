@@ -910,6 +910,7 @@ function createStoreManager(storesDir) {
 
   function reconcileStore(options = {}) {
     const database = requireDb();
+    const meta = ensureStoreMeta(database, currentStoreName);
     return runStoreReconciliation(
       database,
       {
@@ -917,7 +918,10 @@ function createStoreManager(storesDir) {
         getAllInvoiceLines,
         getInvoices,
       },
-      options
+      {
+        ...options,
+        batchTemplate: meta ? meta.batch_template : DEFAULT_BATCH_TEMPLATE,
+      }
     );
   }
 
@@ -1145,7 +1149,17 @@ function createStoreManager(storesDir) {
   }
 
   function getStoreReconciliation() {
-    return buildWorkingReconciliation(getOpenBatches(), getOpenInvoiceLines(), getInvoices());
+    const database = requireDb();
+    const meta = ensureStoreMeta(database, currentStoreName);
+    const openBatches = getOpenBatches();
+    const openLines = getOpenInvoiceLines();
+    if (
+      meta?.batch_template === "cstore_green_valley" &&
+      (openBatches.length > 0 || openLines.length > 0)
+    ) {
+      return reconcileStore();
+    }
+    return buildWorkingReconciliation(openBatches, openLines, getInvoices());
   }
 
   function confirmReconciliation() {
@@ -1159,7 +1173,11 @@ function createStoreManager(storesDir) {
       throw new Error("No matched pairs to confirm. Run Reconcile store first.");
     }
 
-    const working = buildWorkingReconciliation(openBatches, openLines, getInvoices());
+    const meta = ensureStoreMeta(database, currentStoreName);
+    const working =
+      meta?.batch_template === "cstore_green_valley"
+        ? reconcileStore()
+        : buildWorkingReconciliation(openBatches, openLines, getInvoices());
     const summary = working.summary;
     const runAt = new Date().toISOString();
 

@@ -3,6 +3,7 @@ const {
   BATCH_MATCH_STATUS,
   sumMismatchShortfall,
 } = require("./reconcile");
+const { reconcileGreenValley } = require("./reconcile-green-valley");
 
 function round2(value) {
   return Math.round(Number(value) * 100) / 100;
@@ -227,6 +228,16 @@ function applyReconciliation(database, result, runAt, { expectedBatchIds = new S
       });
     }
 
+    for (const { batch } of result.expectedOnNextInvoiceBatches || []) {
+      updateBatch.run({
+        id: batch.id,
+        match_status: BATCH_MATCH_STATUS.EXPECTED_ON_NEXT_INVOICE,
+        invoice_line_id: null,
+        invoice_amount: null,
+        last_reconciled_at: runAt,
+      });
+    }
+
     for (const { lines } of result.unmatchedLineGroups || []) {
       for (const line of lines) {
         updateLine.run({
@@ -299,6 +310,7 @@ function adjustResultForExpected(result, expectedBatchIds, promoteExpected) {
  */
 function runStoreReconciliation(database, loaders, options = {}) {
   const promoteExpected = Boolean(options.promoteExpected);
+  const useGreenValleyLogic = options.batchTemplate === "cstore_green_valley";
   const allBatches = loaders.getBatches();
   const allLines = loaders.getAllInvoiceLines();
   const openBatches = allBatches.filter(isOpenRow);
@@ -313,6 +325,38 @@ function runStoreReconciliation(database, loaders, options = {}) {
   );
 
   resetStoreReconciliationState(database);
+
+  // Green Valley intentionally uses a separate aggregate control calculation.
+  // All other stores continue through the existing per-batch reconciler below.
+  if (useGreenValleyLogic) {
+    const expectedBatches = openBatches.filter((batch) => expectedBatchIds.has(batch.id));
+    const eligibleBatches = openBatches.filter((batch) => !expectedBatchIds.has(batch.id));
+    const openInvoiceIds = new Set(openLines.map((line) => Number(line.invoice_id)));
+    const openInvoices = invoices.filter((invoice) => openInvoiceIds.has(Number(invoice.id)));
+    const invoiceTotal = round2(
+      openInvoices.reduce((sum, invoice) => sum + Number(invoice.invoice_total), 0)
+    );
+    const balances = openInvoices
+      .map((invoice) => invoice.invoice_balance)
+      .filter((balance) => balance !== null && balance !== undefined);
+    const invoiceBalance =
+      balances.length === openInvoices.length && balances.length > 0
+        ? round2(balances.reduce((sum, balance) => sum + Number(balance), 0))
+        : null;
+    const result = reconcileGreenValley({
+      invoiceTotal,
+      invoiceBalance,
+      lines: openLines,
+      scopedBatches: eligibleBatches,
+      expectedBatches,
+    });
+
+    applyReconciliation(database, result, runAt, {
+      expectedBatchIds,
+      promoteExpected: false,
+    });
+    return formatStoreReconciliationResult(result, runAt, openInvoices.length);
+  }
 
   const rawResult = reconcile({
     invoiceTotal,

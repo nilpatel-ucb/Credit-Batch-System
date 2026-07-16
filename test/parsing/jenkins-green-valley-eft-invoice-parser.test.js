@@ -54,7 +54,7 @@ function testSkipsNumericInvoiceRowsAsBatchLines() {
   assert.ok(warnings.some((w) => /No letter-prefixed batch lines/i.test(w.message)));
   assert.ok(summary);
   assert.strictEqual(summary.invoiceNumber, "0619631");
-  assert.strictEqual(summary.amount, 28801.59);
+  assert.strictEqual(summary.amount, 28687.38);
   assert.strictEqual(summary.balance, -51012.12);
 }
 
@@ -97,7 +97,7 @@ async function testRealGreenValleyFixturePdf() {
 
   assert.ok(result.summary);
   assert.strictEqual(result.summary.invoiceNumber, "0619631");
-  assert.strictEqual(result.summary.amount, 28801.59);
+  assert.strictEqual(result.summary.amount, 58604.07);
   assert.strictEqual(result.summary.balance, -51012.12);
 
   assert.strictEqual(result.batchLines.length, 49);
