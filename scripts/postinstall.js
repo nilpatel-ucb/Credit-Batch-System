@@ -4,21 +4,29 @@ const path = require("path");
 
 const root = path.join(__dirname, "..");
 const electronDir = path.join(root, "node_modules", "electron");
-const frameworkPath = path.join(
-  electronDir,
-  "dist",
-  "Electron.app",
-  "Contents",
-  "Frameworks",
-  "Electron Framework.framework",
-  "Electron Framework"
-);
+
+function electronBinaryRelative() {
+  if (process.platform === "darwin") {
+    return path.join(
+      "Electron.app",
+      "Contents",
+      "MacOS",
+      "Electron"
+    );
+  }
+  if (process.platform === "win32") {
+    return "electron.exe";
+  }
+  return "electron";
+}
+
+function electronBinaryPath() {
+  return path.join(electronDir, "dist", electronBinaryRelative());
+}
 
 function electronReady() {
-  if (!fs.existsSync(frameworkPath)) return false;
   try {
-    const stat = fs.statSync(frameworkPath);
-    return stat.isFile() || stat.isSymbolicLink();
+    return fs.existsSync(electronBinaryPath());
   } catch {
     return false;
   }
@@ -28,10 +36,29 @@ function run(cmd, opts = {}) {
   execSync(cmd, { cwd: root, stdio: "inherit", ...opts });
 }
 
+function extractZip(zipPath, dest) {
+  if (process.platform === "darwin") {
+    // unzip preserves macOS symlinks; extract-zip does not
+    run(`unzip -q -o "${zipPath}" -d "${dest}"`);
+    return;
+  }
+
+  if (process.platform === "win32") {
+    const psZip = zipPath.replace(/'/g, "''");
+    const psDest = dest.replace(/'/g, "''");
+    run(
+      `powershell -NoProfile -Command "Expand-Archive -LiteralPath '${psZip}' -DestinationPath '${psDest}' -Force"`
+    );
+    return;
+  }
+
+  run(`unzip -q -o "${zipPath}" -d "${dest}"`);
+}
+
 async function downloadElectron() {
   const { downloadArtifact } = require("@electron/get");
   const version = require(path.join(electronDir, "package.json")).version;
-  const arch = process.arch === "x64" ? "x64" : "arm64";
+  const arch = process.arch === "x64" ? "x64" : process.arch === "arm64" ? "arm64" : process.arch;
 
   console.log(`Downloading Electron ${version} (${process.platform}-${arch})…`);
   const zipPath = await downloadArtifact({
@@ -45,18 +72,12 @@ async function downloadElectron() {
   const dist = path.join(electronDir, "dist");
   fs.rmSync(dist, { recursive: true, force: true });
   fs.mkdirSync(dist, { recursive: true });
+  extractZip(zipPath, dist);
 
-  // unzip preserves macOS symlinks; extract-zip does not
-  run(`unzip -q -o "${zipPath}" -d "${dist}"`);
-
-  const platformPath =
-    process.platform === "darwin"
-      ? "Electron.app/Contents/MacOS/Electron"
-      : process.platform === "win32"
-        ? "electron.exe"
-        : "electron";
-
-  fs.writeFileSync(path.join(electronDir, "path.txt"), platformPath);
+  fs.writeFileSync(
+    path.join(electronDir, "path.txt"),
+    electronBinaryRelative().split(path.sep).join("/")
+  );
 }
 
 async function main() {

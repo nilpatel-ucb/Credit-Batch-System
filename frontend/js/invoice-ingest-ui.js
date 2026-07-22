@@ -65,6 +65,130 @@ const InvoiceIngestUI = (() => {
     document.getElementById("confirm-invoice-btn").disabled = !enabled;
   }
 
+  const COPY_ICON_SVG =
+    '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+
+  function formatExcelMoney(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n.toFixed(2) : "";
+  }
+
+  function escapeTsvCell(value) {
+    const text = String(value ?? "");
+    if (/[\t\n\r"]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  }
+
+  function getPreviewColumns() {
+    const items = validItems();
+    const columns = [];
+    if (items.length > 1) {
+      columns.push({ key: "invoice", label: "Invoice #" });
+    }
+    columns.push(
+      { key: "lineId", label: "Invoice Line ID" },
+      { key: "batch", label: "Batch #" },
+      { key: "date", label: "Date" },
+      { key: "amount", label: "Amount", className: "num" }
+    );
+    return columns;
+  }
+
+  function getPreviewRows() {
+    const rows = [];
+    for (const item of validItems()) {
+      for (const line of item.batchLines) {
+        rows.push({
+          invoice: item.summary.invoiceNumber,
+          lineId: line.invoiceId,
+          batch: StoreSelector.stripLeadingZeros(line.batchNumber),
+          date: StoreSelector.formatDate(line.invDate),
+          amount: formatExcelMoney(line.amount),
+        });
+      }
+    }
+    return rows;
+  }
+
+  function buildPreviewTsv() {
+    const columns = getPreviewColumns();
+    const rows = getPreviewRows();
+    const lines = [columns.map((col) => escapeTsvCell(col.label)).join("\t")];
+    for (const row of rows) {
+      lines.push(columns.map((col) => escapeTsvCell(row[col.key])).join("\t"));
+    }
+    return lines.join("\n");
+  }
+
+  function renderColumnHeader(col) {
+    const classAttr = col.className ? ` class="${col.className}"` : "";
+    return `<th${classAttr}><span class="th-label">${col.label}<button type="button" class="col-copy-btn" data-copy-col="${col.key}" title="Copy ${col.label} column" aria-label="Copy ${col.label} column">${COPY_ICON_SVG}</button></span></th>`;
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
+
+  async function flashCopyButton(btn) {
+    if (!btn) return;
+    btn.classList.add("copied");
+    setTimeout(() => btn.classList.remove("copied"), 1200);
+  }
+
+  async function copyPreviewForExcel() {
+    const items = validItems();
+    const btn = document.getElementById("copy-invoice-preview-btn");
+    if (!items.length) {
+      showStatus("Nothing to copy yet — parse a PDF first.", "error");
+      return;
+    }
+
+    try {
+      await copyText(buildPreviewTsv());
+      const original = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(() => {
+        btn.textContent = original;
+      }, 1500);
+      showStatus("Preview rows copied. Paste into Excel with Ctrl/Cmd+V.", "success");
+    } catch (err) {
+      showStatus(err.message || "Failed to copy preview rows.", "error");
+    }
+  }
+
+  async function copyPreviewColumn(columnKey, btn) {
+    const columns = getPreviewColumns();
+    const column = columns.find((col) => col.key === columnKey);
+    const rows = getPreviewRows();
+    if (!column || !rows.length) {
+      showStatus("Nothing to copy yet — parse a PDF first.", "error");
+      return;
+    }
+
+    try {
+      const text = rows.map((row) => String(row[column.key] ?? "")).join("\n");
+      await copyText(text);
+      await flashCopyButton(btn);
+      showStatus(`Copied ${column.label} column (${rows.length} value${rows.length === 1 ? "" : "s"}).`, "success");
+    } catch (err) {
+      showStatus(err.message || "Failed to copy column.", "error");
+    }
+  }
+
   function computePeriod(batchLines) {
     if (!batchLines.length) return { start: "", end: "" };
     const dates = batchLines.map((line) => line.invDate).sort();
@@ -141,21 +265,20 @@ const InvoiceIngestUI = (() => {
     }
 
     const thead = document.querySelector("#invoice-preview-table thead tr");
-    thead.innerHTML = multiple
-      ? `<th>Invoice #</th><th>Invoice Line ID</th><th>Batch #</th><th>Date</th><th>Amount</th>`
-      : `<th>Invoice Line ID</th><th>Batch #</th><th>Date</th><th>Amount</th>`;
+    thead.innerHTML = getPreviewColumns().map(renderColumnHeader).join("");
 
     const rows = [];
     for (const item of items) {
       for (const line of item.batchLines) {
-        const invoiceCell = multiple ? `<td>${item.summary.invoiceNumber}</td>` : "";
-        rows.push(`<tr>
-          ${invoiceCell}
-          <td>${line.invoiceId}</td>
-          <td>${StoreSelector.stripLeadingZeros(line.batchNumber)}</td>
-          <td>${StoreSelector.formatDate(line.invDate)}</td>
-          <td class="num">${StoreSelector.formatMoney(line.amount)}</td>
-        </tr>`);
+        const cells = [];
+        if (multiple) cells.push(`<td>${item.summary.invoiceNumber}</td>`);
+        cells.push(
+          `<td>${line.invoiceId}</td>`,
+          `<td>${StoreSelector.stripLeadingZeros(line.batchNumber)}</td>`,
+          `<td>${StoreSelector.formatDate(line.invDate)}</td>`,
+          `<td class="num">${StoreSelector.formatMoney(line.amount)}</td>`
+        );
+        rows.push(`<tr>${cells.join("")}</tr>`);
       }
     }
 
@@ -450,6 +573,16 @@ const InvoiceIngestUI = (() => {
       }
       const files = pdfFilesFromDrop(e);
       if (files.length) handlePdfFiles(files);
+    });
+
+    document.getElementById("copy-invoice-preview-btn").addEventListener("click", () => {
+      copyPreviewForExcel();
+    });
+
+    document.querySelector("#invoice-preview-table thead").addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-copy-col]");
+      if (!btn) return;
+      copyPreviewColumn(btn.getAttribute("data-copy-col"), btn);
     });
 
     document.getElementById("confirm-invoice-btn").addEventListener("click", () => {

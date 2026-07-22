@@ -4,7 +4,7 @@ Credit Batch Reconciler is a local Electron desktop application for gas-station 
 
 All PDF parsing, storage, and reconciliation happen on the computer running the app. The current application does not upload data to a server or require an account.
 
-> **Current scope:** the repository contains the working desktop ledger, PDF import, dashboard, and reconciliation workflow. Excel export, legacy workbook import, packaged installers, cloud sync, and accounting integrations are not currently implemented.
+> **Current scope:** the repository contains the working desktop ledger, PDF import, dashboard, reconciliation workflow, and Windows installer packaging via GitHub Actions. Excel export, legacy workbook import, cloud sync, and accounting integrations are not currently implemented.
 
 ## Screenshots
 
@@ -217,7 +217,7 @@ For backups, close the application before copying a store database. Do not open 
 - Internet access during dependency installation so Electron can be downloaded
 - macOS is the currently verified development environment
 
-This repository currently runs from source; it does not include a packaged installer. Current start and setup scripts are POSIX/macOS-oriented (`env -u` and a macOS Electron framework check), so Windows packaging and first-run setup are not operational yet.
+Daily development runs from source on macOS (`npm start` uses POSIX `env -u`). Windows installers are produced on a Windows GitHub Actions runner — do not cross-compile the `.exe` from a Mac, because `better-sqlite3` needs native Windows binaries.
 
 ### Install
 
@@ -266,6 +266,39 @@ npm run rebuild:electron  # prepare better-sqlite3 for Electron
 
 If a command reports a `NODE_MODULE_VERSION` mismatch, run the rebuild command for the runtime you are about to use.
 
+### Package a Windows installer
+
+On a Windows machine (or in CI), after `npm ci`:
+
+```bash
+npm run build:win
+```
+
+The NSIS installer is written to `dist/` as `Credit Batch Reconciler-Setup-<version>.exe`.
+
+To ship a downloadable release from GitHub:
+
+1. Commit and push the packaging changes.
+2. Create and push a version tag, for example:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+3. The **Build Windows installer** workflow runs on `windows-latest`, uploads the `.exe` artifact, and attaches it to a GitHub Release for that tag.
+4. Download the installer from the repository **Releases** page.
+
+You can also run the workflow manually from the Actions tab (`workflow_dispatch`) without creating a tag; that uploads the artifact but does not create a Release.
+
+Code signing is not configured yet. Windows SmartScreen may warn on first install until a certificate is added.
+
+Local Mac packages for development smoke-tests:
+
+```bash
+npm run build:mac
+```
+
 ## Architecture
 
 ```text
@@ -290,6 +323,9 @@ Documentation/
   PRD_credit_batch_reconciler.md
   pdf_extraction_methods.md
 ```
+
+Root `package.json` scripts: `start`, `test`, `setup`, `build:mac`, `build:win`.
+Windows installers are built by `.github/workflows/build-windows.yml` on version tags.
 
 The renderer has no direct Node.js or database access. It uses the context-isolated API in `backend/preload.js`; Electron's main process performs filesystem access, parsing, database work, and reconciliation.
 
@@ -316,7 +352,7 @@ Schema migrations run automatically when a store is opened.
 
 - No Excel or CSV export.
 - No import from legacy Excel workbooks.
-- No packaged `.app`, `.exe`, auto-update, or code-signing configuration.
+- No auto-update or code-signing configuration (Windows `.exe` builds via GitHub Actions on version tags).
 - No user accounts, permissions, encryption layer, cloud backup, or multi-user synchronization.
 - No QuickBooks or other accounting-system integration.
 - No OCR for scanned PDFs.

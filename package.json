@@ -9,10 +9,12 @@
     "rebuild:node": "npm rebuild better-sqlite3",
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
     "test": "npm run rebuild:node && node test/reconciling/store.test.js && node test/reconciling/reconcile.test.js && node test/reconciling/reconcile-green-valley.test.js && node test/parsing/chevron-parser-regression.test.js && node test/parsing/cstore-green-valley-parser.test.js && node test/parsing/eft-invoice-parser.test.js && node test/parsing/jackson-eft-invoice-parser.test.js && node test/parsing/jenkins-green-valley-eft-invoice-parser.test.js",
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win --x64"
   },
   "keywords": [],
-  "author": "",
+  "author": "Credit Batch Reconciler",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
@@ -21,6 +23,50 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
-    "electron": "^35.0.0"
+    "electron": "^35.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.creditbatch.reconciler",
+    "productName": "Credit Batch Reconciler",
+    "copyright": "Copyright © Credit Batch Reconciler",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "backend/**/*",
+      "frontend/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "mac": {
+      "category": "public.app-category.business",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Credit Batch Reconciler"
+    }
   }
 }

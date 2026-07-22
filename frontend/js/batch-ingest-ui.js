@@ -99,6 +99,133 @@ const BatchIngestUI = (() => {
     document.getElementById("confirm-ingest-btn").disabled = !enabled;
   }
 
+  const COPY_ICON_SVG =
+    '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+
+  function formatExcelMoney(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n.toFixed(2) : "";
+  }
+
+  function escapeTsvCell(value) {
+    const text = String(value ?? "");
+    if (/[\t\n\r"]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  }
+
+  function getPreviewColumns() {
+    const columns = [];
+    if (pendingItems.length > 1) {
+      columns.push({ key: "source", label: "Source PDF" });
+    }
+    columns.push(
+      { key: "date", label: "Date" },
+      { key: "batch", label: "Batch #" },
+      { key: "credit", label: "Credit", className: "num" },
+      { key: "fee", label: "Fee", className: "num" },
+      { key: "net", label: "After Fee Credit", className: "num" },
+      { key: "site", label: "Site ID" }
+    );
+    return columns;
+  }
+
+  function getPreviewRows() {
+    const rows = [];
+    for (const item of validItems()) {
+      for (const record of item.records) {
+        rows.push({
+          source: item.filename,
+          date: StoreSelector.formatDate(record.batch_date),
+          batch: StoreSelector.stripLeadingZeros(record.batch_number),
+          credit: formatExcelMoney(record.gross_amount),
+          fee: formatExcelMoney(record.total_fee),
+          net: formatExcelMoney(record.net_amount),
+          site: record.site_id,
+        });
+      }
+    }
+    return rows;
+  }
+
+  function buildPreviewTsv() {
+    const columns = getPreviewColumns();
+    const rows = getPreviewRows();
+    const lines = [columns.map((col) => escapeTsvCell(col.label)).join("\t")];
+    for (const row of rows) {
+      lines.push(columns.map((col) => escapeTsvCell(row[col.key])).join("\t"));
+    }
+    return lines.join("\n");
+  }
+
+  function renderColumnHeader(col) {
+    const classAttr = col.className ? ` class="${col.className}"` : "";
+    return `<th${classAttr}><span class="th-label">${col.label}<button type="button" class="col-copy-btn" data-copy-col="${col.key}" title="Copy ${col.label} column" aria-label="Copy ${col.label} column">${COPY_ICON_SVG}</button></span></th>`;
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
+
+  async function flashCopyButton(btn) {
+    if (!btn) return;
+    btn.classList.add("copied");
+    setTimeout(() => btn.classList.remove("copied"), 1200);
+  }
+
+  async function copyPreviewForExcel() {
+    const items = validItems();
+    const btn = document.getElementById("copy-preview-btn");
+    if (!items.length) {
+      showStatus("Nothing to copy yet — parse a PDF first.", "error");
+      return;
+    }
+
+    try {
+      await copyText(buildPreviewTsv());
+      const original = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(() => {
+        btn.textContent = original;
+      }, 1500);
+      showStatus("Preview rows copied. Paste into Excel with Ctrl/Cmd+V.", "success");
+    } catch (err) {
+      showStatus(err.message || "Failed to copy preview rows.", "error");
+    }
+  }
+
+  async function copyPreviewColumn(columnKey, btn) {
+    const columns = getPreviewColumns();
+    const column = columns.find((col) => col.key === columnKey);
+    const rows = getPreviewRows();
+    if (!column || !rows.length) {
+      showStatus("Nothing to copy yet — parse a PDF first.", "error");
+      return;
+    }
+
+    try {
+      const text = rows.map((row) => String(row[column.key] ?? "")).join("\n");
+      await copyText(text);
+      await flashCopyButton(btn);
+      showStatus(`Copied ${column.label} column (${rows.length} value${rows.length === 1 ? "" : "s"}).`, "success");
+    } catch (err) {
+      showStatus(err.message || "Failed to copy column.", "error");
+    }
+  }
+
   function clearPreview() {
     pendingItems = [];
     document.getElementById("preview-section").hidden = true;
@@ -116,25 +243,24 @@ const BatchIngestUI = (() => {
 
   function renderPreview() {
     const items = validItems();
-    const showSource = pendingItems.length > 1;
+    const columns = getPreviewColumns();
     const thead = document.querySelector("#preview-table thead tr");
-    thead.innerHTML = showSource
-      ? `<th>Source PDF</th><th>Date</th><th>Batch #</th><th>Credit</th><th>Fee</th><th>After Fee Credit</th><th>Site ID</th>`
-      : `<th>Date</th><th>Batch #</th><th>Credit</th><th>Fee</th><th>After Fee Credit</th><th>Site ID</th>`;
+    thead.innerHTML = columns.map(renderColumnHeader).join("");
 
     const rows = [];
     for (const item of items) {
       for (const record of item.records) {
-        const sourceCell = showSource ? `<td>${item.filename}</td>` : "";
-        rows.push(`<tr>
-          ${sourceCell}
-          <td>${StoreSelector.formatDate(record.batch_date)}</td>
-          <td>${StoreSelector.stripLeadingZeros(record.batch_number)}</td>
-          <td class="num">${StoreSelector.formatMoney(record.gross_amount)}</td>
-          <td class="num">${StoreSelector.formatMoney(record.total_fee)}</td>
-          <td class="num">${StoreSelector.formatMoney(record.net_amount)}</td>
-          <td>${record.site_id}</td>
-        </tr>`);
+        const cells = [];
+        if (pendingItems.length > 1) cells.push(`<td>${item.filename}</td>`);
+        cells.push(
+          `<td>${StoreSelector.formatDate(record.batch_date)}</td>`,
+          `<td>${StoreSelector.stripLeadingZeros(record.batch_number)}</td>`,
+          `<td class="num">${StoreSelector.formatMoney(record.gross_amount)}</td>`,
+          `<td class="num">${StoreSelector.formatMoney(record.total_fee)}</td>`,
+          `<td class="num">${StoreSelector.formatMoney(record.net_amount)}</td>`,
+          `<td>${record.site_id}</td>`
+        );
+        rows.push(`<tr>${cells.join("")}</tr>`);
       }
     }
 
@@ -348,6 +474,16 @@ const BatchIngestUI = (() => {
       }
       const files = pdfFilesFromDrop(e);
       if (files.length) handlePdfFiles(files);
+    });
+
+    document.getElementById("copy-preview-btn").addEventListener("click", () => {
+      copyPreviewForExcel();
+    });
+
+    document.querySelector("#preview-table thead").addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-copy-col]");
+      if (!btn) return;
+      copyPreviewColumn(btn.getAttribute("data-copy-col"), btn);
     });
 
     document.getElementById("confirm-ingest-btn").addEventListener("click", () => {
