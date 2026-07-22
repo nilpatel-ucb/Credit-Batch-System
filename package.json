@@ -10,8 +10,8 @@
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
     "test": "npm run rebuild:node && node test/reconciling/store.test.js && node test/reconciling/reconcile.test.js && node test/reconciling/reconcile-green-valley.test.js && node test/parsing/chevron-parser-regression.test.js && node test/parsing/cstore-green-valley-parser.test.js && node test/parsing/eft-invoice-parser.test.js && node test/parsing/jackson-eft-invoice-parser.test.js && node test/parsing/jenkins-green-valley-eft-invoice-parser.test.js",
     "postinstall": "node scripts/postinstall.js",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win --x64"
+    "build:mac": "electron-builder --mac --publish never",
+    "build:win": "electron-builder --win --x64 --publish never"
   },
   "keywords": [],
   "author": "Credit Batch Reconciler",

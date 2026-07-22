@@ -26,6 +26,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # electron-builder publishes separately via softprops below (--publish never).
       - name: Build Windows NSIS installer
         run: npm run build:win
         env:
