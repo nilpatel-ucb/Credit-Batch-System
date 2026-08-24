@@ -6,39 +6,46 @@ All PDF parsing, storage, and reconciliation happen on the computer running the 
 
 > **Current scope:** the repository contains the working desktop ledger, PDF import, dashboard, reconciliation workflow, and Windows installer packaging via GitHub Actions. Excel export, legacy workbook import, cloud sync, and accounting integrations are not currently implemented.
 
+
+
 ## Problem to be solved
 
-Gas station operators receive credit-card settlement PDFs and EFT prenotification invoices from their processor. Without a dedicated tool they typically:
+When a customers purchases gasoline at the pump, using their credit card, this credit doesn't directly transfer to the gas station operator, rather its held by the copmany which sold them the gasoline. The gasoline is later split up in batches, with the credit for each batch being reimbersed back to the gas station operator. During the process of reimbersment the peterolum redistributor may forget to transfer these funds. In which case if it goes unchecked it may lead to a $30,0000-$40,000 loss.
+
+The current method involved: 
 
 - Manually re-key batch totals into Excel workbooks — slow and easy to mistype
 - Keep one spreadsheet per store where batches, invoice amounts, and notes are mixed together
-- Fail to catch when an invoice is missing credit batches, because reconciliation only covers whatever PDF or spreadsheet slice is open in that session — not the full history for the store
 
 With multiple stores the problem compounds: each site has its own batches and invoices, and batch numbers can collide across locations. There was no purpose-built local app that accumulates batch history, stores invoice lines, and flags missing or incorrect credits for review.
 
 ## Screenshots
 
+
+
 ### Dashboard
 
-![Dashboard showing credit status and reconciliation summary](Screenshots/credit%20batch%201.png)
+Dashboard showing credit status and reconciliation summary
 
 ### Storage location
 
-![Change storage location dialog](Screenshots/credit%20batch%202.png)
+Change storage location dialog
 
 ### Batch ledger
 
-![Batch ledger with matched settlement batches](Screenshots/credit%20batch%203.png)
+Batch ledger with matched settlement batches
 
 ### Open reconciliation
 
-![Open reconciliation showing batches missing from an invoice](Screenshots/credit%20batch%204.png)
+Open reconciliation showing batches missing from an invoice
 
 ### Store selection
 
-![Store selection sidebar](Screenshots/credit%20batch%205.png)
+Store selection sidebar
 
 ## What the app does
+
+
 
 ### Maintains an isolated ledger for every store
 
@@ -50,6 +57,8 @@ With multiple stores the problem compounds: each site has its own batches and in
 - Allows store details and parser selections to be edited.
 - Permanently deletes a store and its database after confirmation.
 - Shows the active database path and can reveal it in Finder.
+
+
 
 ### Imports settlement batch PDFs
 
@@ -67,6 +76,8 @@ Supported settlement layouts:
 
 - **Chevron**
 - **CStore Green Valley**
+
+
 
 ### Imports EFT prenotification PDFs
 
@@ -99,6 +110,8 @@ The top of the app summarizes the active store:
 - **Coverage indicator** — reports open batches, open invoice lines, pending confirmations, missing batches, and unmatched lines.
 - **Coverage warning** — indicates whether the discrepancy is final or may be provisional because open problems remain.
 
+
+
 ### Displays and searches the batch ledger
 
 - Shows date, batch number, gross, fee, net, status, matched invoice line, invoice amount, and source PDF.
@@ -111,6 +124,8 @@ The top of the app summarizes the active store:
   - matches already archived in confirmed reconciliation runs.
 - Deletes an individual batch after confirmation.
 - Deletes every batch from a selected source upload after confirmation.
+
+
 
 ### Supports manual batch entry
 
@@ -178,6 +193,8 @@ A batch marked **Expected on next invoice** remains excluded during manual recon
 - Includes confirmed results in batch-number searches.
 - Keeps unresolved records available for future reconciliation.
 
+
+
 ### Manages invoices and corrections
 
 - Lists saved invoices as expandable cards with filename, period, line count, and invoice total.
@@ -218,7 +235,11 @@ For backups, close the application before copying a store database. Do not open 
 8. Choose **Confirm matches** to archive successful pairs.
 9. Use batch-number search and confirmed runs to investigate historical activity.
 
+
+
 ## Installation and development
+
+
 
 ### Prerequisites
 
@@ -296,8 +317,8 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-3. The **Build Windows installer** workflow runs on `windows-latest`, uploads the `.exe` artifact, and attaches it to a GitHub Release for that tag.
-4. Download the installer from the repository **Releases** page.
+1. The **Build Windows installer** workflow runs on `windows-latest`, uploads the `.exe` artifact, and attaches it to a GitHub Release for that tag.
+2. Download the installer from the repository **Releases** page.
 
 You can also run the workflow manually from the Actions tab (`workflow_dispatch`) without creating a tag; that uploads the artifact but does not create a Release.
 
@@ -308,6 +329,8 @@ Local Mac packages for development smoke-tests:
 ```bash
 npm run build:mac
 ```
+
+
 
 ## Architecture
 
@@ -357,6 +380,8 @@ Schema migrations run automatically when a store is opened.
 - Store databases and imported financial data are not committed because `*.db` is ignored by Git.
 - Original PDFs are parsed from the selected files but are not copied into the data folder; the database stores their filenames and extracted values.
 - The app is designed for text-based PDFs. It does not perform OCR on scanned images.
+
+
 
 ## Current limitations
 
