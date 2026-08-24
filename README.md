@@ -6,6 +6,16 @@ All PDF parsing, storage, and reconciliation happen on the computer running the 
 
 > **Current scope:** the repository contains the working desktop ledger, PDF import, dashboard, reconciliation workflow, and Windows installer packaging via GitHub Actions. Excel export, legacy workbook import, cloud sync, and accounting integrations are not currently implemented.
 
+## Problem to be solved
+
+Gas station operators receive credit-card settlement PDFs and EFT prenotification invoices from their processor. Without a dedicated tool they typically:
+
+- Manually re-key batch totals into Excel workbooks — slow and easy to mistype
+- Keep one spreadsheet per store where batches, invoice amounts, and notes are mixed together
+- Fail to catch when an invoice is missing credit batches, because reconciliation only covers whatever PDF or spreadsheet slice is open in that session — not the full history for the store
+
+With multiple stores the problem compounds: each site has its own batches and invoices, and batch numbers can collide across locations. There was no purpose-built local app that accumulates batch history, stores invoice lines, and flags missing or incorrect credits for review.
+
 ## Screenshots
 
 ### Dashboard

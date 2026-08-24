@@ -2,6 +2,8 @@
  * Chevron credit batch PDF template.
  * PDF lines → raw batch records. Only this file changes for new processor formats.
  */
+
+//hardcoded regex for the template patterns to extract the data from the pdf
 const ChevronTemplate = (() => {
   const DETAIL_ROW_RE =
     /^(\d{5,6})\s+(\d{2}-\d{2}-\d{4})\s+(\d+)\s+(CHV|CC|DC)\b/i;
@@ -12,7 +14,7 @@ const ChevronTemplate = (() => {
 
   function preprocessLines(lines) {
     const merged = [];
-
+//hardcoded logic to merge lines (regex)
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i].trim();
       if (!line) continue;
@@ -56,8 +58,18 @@ const ChevronTemplate = (() => {
     return new Date(year, month - 1, day);
   }
 
+  //outputs a flat array of objects with the following properties:
+  //date: string
+  //batch_number: string
+  //credit: number
+  //fee: number
+  //after_fee_credit: number
+  //site_id: string
+
+//function isHeaderNoise checks if the line is a header noise
   function isHeaderNoise(line) {
     const trimmed = line.trim();
+    //record from batch total
     if (!trimmed) return true;
     if (/^Site\s+Date\s+Batch/i.test(trimmed)) return true;
     if (/^Batch\s+Amount\s+Fuel/i.test(trimmed)) return true;
