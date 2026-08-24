@@ -394,15 +394,3 @@ Schema migrations run automatically when a store is opened.
 - No undo for deletions or reconciliation confirmation.
 
 See `Documentation/PRD_credit_batch_reconciler.md` for the broader product roadmap. Treat that document as planning material; this README describes the behavior currently implemented in the repository.
-
-## Adding screenshots
-
-Screenshots are stored in `Screenshots/`. Additional useful captures include:
-
-1. Settlement PDF preview.
-2. EFT invoice preview.
-3. Open reconciliation with multiple status types.
-4. Expanded confirmed run.
-5. Expanded invoice card.
-
-Use anonymized store names, site IDs, invoice numbers, filenames, and dollar amounts before committing images.
