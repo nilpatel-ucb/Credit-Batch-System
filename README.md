@@ -21,27 +21,25 @@ With multiple stores the problem compounds: each site has its own batches and in
 
 ## Screenshots
 
-
-
 ### Dashboard
 
-Dashboard showing credit status and reconciliation summary
+![Dashboard showing credit status and reconciliation summary](Screenshots/credit%20batch%201.png)
 
 ### Storage location
 
-Change storage location dialog
+![Change storage location dialog](Screenshots/credit%20batch%202.png)
 
 ### Batch ledger
 
-Batch ledger with matched settlement batches
+![Batch ledger with matched settlement batches](Screenshots/credit%20batch%203.png)
 
 ### Open reconciliation
 
-Open reconciliation showing batches missing from an invoice
+![Open reconciliation showing batches missing from an invoice](Screenshots/credit%20batch%204.png)
 
 ### Store selection
 
-Store selection sidebar
+![Store selection sidebar](Screenshots/credit%20batch%205.png)
 
 ## What the app does
 
